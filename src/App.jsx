@@ -1,17 +1,36 @@
 import React, { useState, useEffect } from 'react'
 import { supabase } from './supabaseClient'
 import Auth from './components/Auth'
-import { Sun, CloudRain, ChevronLeft, ChevronRight, Plus, X, Square, CheckSquare, Mic } from 'lucide-react'
+import { parseScheduleWithAI } from './utils/gemini'
+import { Sun, CloudRain, ChevronLeft, ChevronRight, Plus, X, Square, CheckSquare, Mic, Loader2 } from 'lucide-react'
 
 export default function App() {
   const [session, setSession] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [dbLoading, setDbLoading] = useState(false)
   
-  // UI 테스트용 상태 제어
-  const [showAiModal, setShowAiModal] = useState(false)
-  const [newScheduleInput, setNewScheduleInput] = useState('')
+  // 실시간 DB 데이터 상태
+  const [events, setEvents] = useState([])
+  const [todos, setTodos] = useState([])
 
-  // 지우님이 정해주신 세련된 뮤트 톤 카테고리 컬러 팔레트
+  // 현재 사용자가 선택한 날짜 상태 (기본값: 오늘 17일)
+  const [selectedDate, setSelectedDate] = useState('2026-07-17')
+
+  // 입력 및 AI 모달 상태
+  const [newScheduleInput, setNewScheduleInput] = useState('')
+  const [isAnalyzing, setIsAnalyzing] = useState(false)
+  const [showAiModal, setShowAiModal] = useState(false)
+  
+  const [parsedResult, setParsedResult] = useState({
+    title: '',
+    date: '',
+    time: '',
+    isTodo: false,
+    category: '',
+    color: ''
+  })
+
+  // 세련된 뮤트 톤 카테고리 컬러 팔레트
   const sophisticatedColors = [
     { name: '딥 테일', hex: '#7DCFB6' },
     { name: '뮤트 코랄', hex: '#E87474' },
@@ -20,11 +39,10 @@ export default function App() {
     { name: '뮤트 베이지', hex: '#DBCBBD' }
   ];
 
-  // 오늘의 브리핑 문구 (image_12.png 복제)
   const briefingText = "지우님, 오늘 오후에 비 소식이 있고 12시 반에 '알바 면접'이 있어요. 12시 정각에는 출발하시는 걸 추천해요.";
 
-  // 2026년 7월 기준 35칸 완전한 달력 데이터 설계 (이전/이후 달 포함 5주 그리드)
-  const calendarDays = [
+  // 2026년 7월 기준 달력 그리드 기본 뼈대 데이터
+  const baseCalendarDays = [
     { day: 29, isCurrentMonth: false, dateStr: '2026-06-29' },
     { day: 30, isCurrentMonth: false, dateStr: '2026-06-30' },
     { day: 1, isCurrentMonth: true, dateStr: '2026-07-01' },
@@ -33,17 +51,17 @@ export default function App() {
     { day: 4, isCurrentMonth: true, dateStr: '2026-07-04' },
     { day: 5, isCurrentMonth: true, dateStr: '2026-07-05' },
     { day: 6, isCurrentMonth: true, dateStr: '2026-07-06' },
-    { day: 7, isCurrentMonth: true, dateStr: '2026-07-07', event: { time: '10:00', title: '치과', color: sophisticatedColors[1].hex } },
+    { day: 7, isCurrentMonth: true, dateStr: '2026-07-07' },
     { day: 8, isCurrentMonth: true, dateStr: '2026-07-08' },
     { day: 9, isCurrentMonth: true, dateStr: '2026-07-09' },
-    { day: 10, isCurrentMonth: true, dateStr: '2026-07-10', event: { time: '19:00', title: '저녁 약속', color: sophisticatedColors[4].hex } },
+    { day: 10, isCurrentMonth: true, dateStr: '2026-07-10' },
     { day: 11, isCurrentMonth: true, dateStr: '2026-07-11' },
     { day: 12, isCurrentMonth: true, dateStr: '2026-07-12' },
     { day: 13, isCurrentMonth: true, dateStr: '2026-07-13' },
     { day: 14, isCurrentMonth: true, dateStr: '2026-07-14' },
     { day: 15, isCurrentMonth: true, dateStr: '2026-07-15' },
     { day: 16, isCurrentMonth: true, dateStr: '2026-07-16' },
-    { day: 17, isCurrentMonth: true, dateStr: '2026-07-17', isToday: true, event: { time: '12:30', title: '알바 면접', color: sophisticatedColors[0].hex } },
+    { day: 17, isCurrentMonth: true, dateStr: '2026-07-17', isToday: true },
     { day: 18, isCurrentMonth: true, dateStr: '2026-07-18' },
     { day: 19, isCurrentMonth: true, dateStr: '2026-07-19' },
     { day: 20, isCurrentMonth: true, dateStr: '2026-07-20' },
@@ -62,73 +80,165 @@ export default function App() {
     { day: 2, isCurrentMonth: false, dateStr: '2026-08-02' }
   ];
 
+  // Supabase 실시간 데이터 불러오기
+  const fetchSchedules = async (userId) => {
+    if (!userId) return
+    setDbLoading(true)
+    try {
+      const { data, error } = await supabase
+        .from('schedules')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+
+      const safeData = data || [];
+      setEvents(safeData.filter(item => !item.is_todo));
+      setTodos(safeData.filter(item => item.is_todo));
+    } catch (err) {
+      console.error("데이터 로딩 실패:", err.message);
+    } finally {
+      setDbLoading(false);
+    }
+  }
+
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session)
+      if (session?.user?.id) fetchSchedules(session.user.id);
       setLoading(false)
     })
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session)
+      if (session?.user?.id) {
+        fetchSchedules(session.user.id);
+      } else {
+        setEvents([]);
+        setTodos([]);
+      }
     })
-
     return () => subscription.unsubscribe()
   }, [])
 
-  if (loading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-white text-neutral-400 font-mono text-xs tracking-widest">
-        LOADING...
-      </div>
-    )
+  // AI 분석 및 최종 저장 로직
+  const handleAnalyze = async () => {
+    if (!newScheduleInput.trim()) return;
+    setIsAnalyzing(true);
+    try {
+      const aiResult = await parseScheduleWithAI(newScheduleInput);
+      setParsedResult({
+        title: aiResult.title || '새로운 일정',
+        date: aiResult.date || '2026-07-17',
+        time: aiResult.time || '',
+        isTodo: aiResult.isTodo || false,
+        category: aiResult.category || '딥 테일',
+        color: aiResult.color || '#7DCFB6'
+      });
+      setShowAiModal(true);
+      setNewScheduleInput('');
+    } catch (error) {
+      alert('AI 분석 실패');
+    } finally {
+      setIsAnalyzing(false);
+    }
   }
 
-  if (!session) {
-    return <Auth />
+  const handleSaveResult = async () => {
+    if (!session?.user?.id) return;
+    try {
+      const { data, error } = await supabase
+        .from('schedules')
+        .insert([{
+          user_id: session.user.id,
+          title: parsedResult.title,
+          date: parsedResult.date,
+          time: parsedResult.time || null,
+          is_todo: parsedResult.isTodo,
+          category: parsedResult.category,
+          color: parsedResult.color,
+          completed: false
+        }])
+        .select();
+
+      if (error) throw error;
+      
+      const savedItem = data?.[0];
+      if (savedItem) {
+        if (savedItem.is_todo) {
+          setTodos(prev => [savedItem, ...(prev || [])]);
+        } else {
+          setEvents(prev => [...(prev || []), savedItem]);
+          setSelectedDate(savedItem.date);
+        }
+      }
+      setShowAiModal(false);
+    } catch (error) {
+      alert(error.message);
+    }
   }
+
+  // To-do 관련 핸들러들
+  const handleAddTodoManual = async (e) => {
+    e.preventDefault();
+    if (!session?.user?.id) return;
+    const inputVal = e.target.todoInput.value;
+    if(!inputVal.trim()) return;
+    try {
+      const { data, error } = await supabase.from('schedules').insert([{ user_id: session.user.id, title: inputVal, is_todo: true, completed: false, date: '2026-07-17', category: '', color: '' }]).select();
+      if (error) throw error;
+      if (data?.[0]) {
+        setTodos(prev => [data[0], ...(prev || [])]);
+      }
+      e.target.reset();
+    } catch (error) { alert(error.message); }
+  }
+
+  const handleToggleTodo = async (todoId, currentCompleted) => {
+    try {
+      const { error } = await supabase.from('schedules').update({ completed: !currentCompleted }).eq('id', todoId);
+      if (error) throw error;
+      setTodos(prev => (prev || []).map(t => t.id === todoId ? { ...t, completed: !currentCompleted } : t));
+    } catch (error) { alert(error.message); }
+  }
+
+  const handleDeleteTodo = async (todoId) => {
+    try {
+      const { error } = await supabase.from('schedules').delete().eq('id', todoId);
+      if (error) throw error;
+      setTodos(prev => (prev || []).filter(t => t.id !== todoId));
+    } catch (error) { alert(error.message); }
+  }
+
+  // 선택된 날짜에 매칭되는 상세 일정 추출 및 시간순 정렬
+  const selectedDateEvents = (events || [])
+    .filter(e => e.date === selectedDate)
+    .sort((a, b) => (a.time || '23:59').localeCompare(b.time || '23:59'));
 
   return (
     <div className="min-h-screen bg-white text-neutral-900 font-sans antialiased px-8 pt-6 pb-32 max-w-7xl mx-auto space-y-8 relative">
       
-      {/* 1. 오늘의 비서 브리핑 배너 (image_12.png 복제) */}
+      {/* 1. 브리핑 배너 */}
       <div className="border border-neutral-200 p-6 space-y-5 rounded-none shadow-none bg-neutral-50/20 relative">
         <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-neutral-950"></div>
         <div className="space-y-3">
           <p className="text-xs font-semibold text-neutral-400 tracking-wider">오늘의 브리핑</p>
           <h2 className="text-sm text-neutral-800 leading-relaxed font-normal">{briefingText}</h2>
         </div>
-        
-        {/* 하단 기상 및 일정 메트릭 */}
         <div className="flex items-center gap-6 pt-1 text-xs text-neutral-500 font-mono tracking-wide">
-          <div className="flex items-center gap-1.5">
-            <CloudRain size={14} className="text-neutral-400" />
-            <span>강수확률 70%</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <Sun size={14} className="text-neutral-400" />
-            <span>현재 <span className="font-bold text-neutral-800">24°C</span></span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className="w-1.5 h-1.5 bg-neutral-300"></span>
-            <span>다음 일정 <span className="font-bold text-neutral-800">12:30</span></span>
-          </div>
+          <div className="flex items-center gap-1.5"><CloudRain size={14} className="text-neutral-400" /><span>강수확률 70%</span></div>
+          <div className="flex items-center gap-1.5"><Sun size={14} className="text-neutral-400" /><span>현재 <span className="font-bold text-neutral-800">24°C</span></span></div>
+          <div className="flex items-center gap-1.5"><span className="w-1.5 h-1.5 bg-neutral-300"></span><span>다음 일정 <span className="font-bold text-neutral-800">12:30</span></span></div>
         </div>
       </div>
 
-      {/* 테스트 편의를 위한 임시 UI 조작 버튼 (AI 분석 레이아웃 확인용) */}
-      <div className="flex justify-end">
-        <button 
-          onClick={() => setShowAiModal(true)} 
-          className="text-xs text-neutral-400 hover:text-neutral-900 border border-neutral-200 px-2 py-1 rounded-sm"
-        >
-          [UI 테스트용] AI 확인 모달 켜기
-        </button>
-      </div>
+      {dbLoading && <div className="text-left text-[10px] font-mono text-neutral-400 animate-pulse tracking-widest">SYNCING DATABASE...</div>}
 
-      {/* 2. 메인 컨텐츠 그리드 (달력 + 할일 레이아웃) */}
+      {/* 2. 메인 그리드 */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-12 pt-4">
         
-        {/* 달력 섹션 (좌측 2/3 차지) */}
+        {/* 달력 섹션 */}
         <div className="lg:col-span-2 space-y-6">
           <div className="flex justify-between items-center">
             <h3 className="text-base font-bold text-neutral-950">2026년 7월</h3>
@@ -139,223 +249,178 @@ export default function App() {
             </div>
           </div>
 
-          {/* 달력 그리드 (31일까지 전체 표시) */}
+          {/* 달력 그리드 */}
           <div className="border-t border-l border-neutral-200 grid grid-cols-7 text-center">
-            {/* 요일 헤더 */}
             {['월', '화', '수', '목', '금', '토', '일'].map((day) => (
-              <div key={day} className="border-b border-r border-neutral-200 py-2 text-xs font-medium text-neutral-400 bg-neutral-50/50">
-                {day}
-              </div>
+              <div key={day} className="border-b border-r border-neutral-200 py-2 text-xs font-medium text-neutral-400 bg-neutral-50/50">{day}</div>
             ))}
             
-            {/* 35일 전체 그리드 출력 */}
-            {calendarDays.map((cell, idx) => (
-              <div 
-                key={idx} 
-                className={`border-b border-r border-neutral-200 p-2 min-h-[90px] text-left text-xs font-mono space-y-1 ${
-                  cell.isCurrentMonth ? 'text-neutral-500' : 'text-neutral-300'
-                } ${cell.isToday ? 'bg-neutral-50/10' : ''}`}
-              >
-                <div className="flex justify-between items-center">
-                  {cell.isToday ? (
-                    <span className="w-5 h-5 flex items-center justify-center bg-neutral-950 text-white rounded-full font-bold">{cell.day}</span>
-                  ) : (
-                    <span>{cell.day < 10 && cell.isCurrentMonth ? `0${cell.day}` : cell.day}</span>
-                  )}
-                </div>
-                
-                {cell.event && (
-                  <div style={{ borderColor: cell.event.color }} className="border-l-2 pl-1.5 py-0.5 text-[10px] leading-tight text-neutral-700 bg-neutral-50/50">
-                    <span className="font-mono text-neutral-400 block">{cell.event.time}</span>
-                    {cell.event.title}
+            {baseCalendarDays.map((cell, idx) => {
+              const matchingEvents = (events || [])
+                .filter(e => e.date === cell.dateStr)
+                .sort((a, b) => (a.time || '23:59').localeCompare(b.time || '23:59'));
+              
+              const isSelected = selectedDate === cell.dateStr;
+
+              return (
+                <div 
+                  key={idx} 
+                  onClick={() => setSelectedDate(cell.dateStr)}
+                  className={`border-b border-r border-neutral-200 p-1.5 h-[104px] text-left text-xs font-mono space-y-1 cursor-pointer transition-colors relative select-none ${
+                    cell.isCurrentMonth ? 'text-neutral-500' : 'text-neutral-300 bg-neutral-50/10'
+                  } ${isSelected ? 'bg-neutral-950/[0.03] ring-1 ring-inset ring-neutral-950' : 'hover:bg-neutral-50/50'}`}
+                >
+                  <div className="flex justify-between items-center">
+                    {cell.isToday ? (
+                      <span className="w-5 h-5 flex items-center justify-center bg-neutral-950 text-white rounded-full font-bold text-[10px]">{cell.day}</span>
+                    ) : (
+                      <span className={isSelected ? 'font-bold text-neutral-950' : ''}>
+                        {cell.day < 10 && cell.isCurrentMonth ? `0${cell.day}` : cell.day}
+                      </span>
+                    )}
                   </div>
-                )}
+                  
+                  {/* 💡 [수정] 첫 번째 피드백: 달력 내부 일정들을 아웃라인 없는 이전 디자인으로 복구 */}
+                  <div className="space-y-0.5 overflow-hidden">
+                    {matchingEvents.slice(0, 2).map(event => (
+                      <div 
+                        key={event.id} 
+                        style={{ borderColor: event.color }} 
+                        className="border-l-2 pl-1.5 py-0.5 text-[10px] leading-tight text-neutral-700 bg-neutral-50/50 break-all"
+                      >
+                        {event.title}
+                      </div>
+                    ))}
+                    {matchingEvents.length > 2 && (
+                      <div className="text-[9px] text-neutral-400 font-sans pl-1.5 pt-0.5">
+                        + {matchingEvents.length - 2}개 더
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* 선택한 날짜의 상세 일정 리스트뷰 */}
+          <div className="border border-neutral-200 p-4 space-y-3 bg-white">
+            <div className="flex justify-between items-baseline border-b border-neutral-100 pb-2">
+              <h4 className="text-xs font-bold text-neutral-900 tracking-wide">
+                {selectedDate.replace(/-/g, '.')} 상세 일정
+              </h4>
+              <span className="text-[10px] font-mono text-neutral-400">{(selectedDateEvents || []).length}개의 계획</span>
+            </div>
+            
+            {/* 💡 [수정] 세 번째 피드백: 일정이 없을 때 오직 '등록된 일정이 없습니다.' 문구만 노출 */}
+            {selectedDateEvents.length === 0 ? (
+              <p className="text-xs text-neutral-400 py-2">등록된 일정이 없습니다.</p>
+            ) : (
+              <div className="space-y-2.5 max-h-48 overflow-y-auto">
+                {/* 💡 [수정] 두 번째 피드백: 상세 항목에서 우측 카테고리 텍스트 라벨 태그 제거 */}
+                {selectedDateEvents.map(event => (
+                  <div key={event.id} className="flex items-center gap-3 py-1 text-sm">
+                    <span style={{ backgroundColor: event.color || '#neutral-950' }} className="w-1.5 h-3 block flex-shrink-0"></span>
+                    <span className="font-mono text-neutral-400 text-xs w-10 flex-shrink-0">
+                      {event.time || '종일'}
+                    </span>
+                    <span className="text-neutral-800 font-medium">{event.title}</span>
+                  </div>
+                ))}
               </div>
-            ))}
+            )}
           </div>
         </div>
 
-        {/* 할 일 관리 섹션 (우측 1/3 차지) */}
+        {/* 할 일 관리 섹션 */}
         <div className="space-y-6">
           <div className="flex justify-between items-baseline">
             <h3 className="text-base font-bold text-neutral-950">할 일</h3>
-            <span className="text-xs font-mono text-neutral-400">4개 남음</span>
+            <span className="text-xs font-mono text-neutral-400">{(todos || []).filter(t => !t.completed).length}개 남음</span>
           </div>
 
-          {/* 할 일 입력창 */}
-          <div className="flex gap-2">
-            <input
-              type="text"
-              placeholder="새 할 일을 입력하고 Enter..."
-              className="flex-1 rounded-sm border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-950 outline-none focus:border-neutral-900"
-            />
-            <button className="rounded-sm bg-neutral-950 px-4 py-2 text-sm font-medium text-white flex items-center gap-1 hover:opacity-90">
-              <Plus size={14} />
-              <span>추가</span>
-            </button>
-          </div>
+          <form onSubmit={handleAddTodoManual} className="flex gap-2">
+            <input name="todoInput" type="text" placeholder="새 할 일을 입력하고 Enter..." className="flex-1 rounded-sm border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-950 outline-none focus:border-neutral-900" />
+            <button type="submit" className="rounded-sm bg-neutral-950 px-4 py-2 text-sm font-medium text-white flex items-center gap-1 hover:opacity-90"><Plus size={14} /><span>추가</span></button>
+          </form>
 
-          {/* 할 일 리스트 루프 */}
           <div className="divide-y divide-neutral-200 border-b border-neutral-200">
-            {/* 진행 중인 리스트 */}
-            <div className="flex items-center justify-between py-3 group">
-              <div className="flex items-center gap-3">
-                <button className="text-neutral-300 hover:text-neutral-900"><Square size={18} /></button>
-                <div className="flex items-baseline gap-2">
-                  <span style={{ backgroundColor: sophisticatedColors[2].hex }} className="w-1.5 h-1.5 rounded-full block"></span>
-                  <span className="text-sm text-neutral-800">한국사 책 읽기</span>
+            {/* 완료되지 않은 일 */}
+            {(todos || []).filter(t => !t.completed).map(todo => (
+              <div key={todo.id} className="flex items-center justify-between py-3 group">
+                <div className="flex items-center gap-3">
+                  <button onClick={() => handleToggleTodo(todo.id, todo.completed)} className="text-neutral-300 hover:text-neutral-900"><Square size={18} /></button>
+                  <div className="flex items-baseline gap-2">
+                    {todo.color && <span style={{ backgroundColor: todo.color }} className="w-1.5 h-1.5 rounded-full block"></span>}
+                    <span className="text-sm text-neutral-800">{todo.title}</span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  {todo.date && <span className="text-xs font-mono text-neutral-400">{todo.date.slice(5)}</span>}
+                  <button onClick={() => handleDeleteTodo(todo.id)} className="text-neutral-300 hover:text-neutral-500 hidden group-hover:block"><X size={14} /></button>
                 </div>
               </div>
-              <span className="text-xs font-mono text-neutral-400 hidden group-hover:block">07-18</span>
-            </div>
-
-            <div className="flex items-center justify-between py-3 group">
-              <div className="flex items-center gap-3">
-                <button className="text-neutral-300 hover:text-neutral-900"><Square size={18} /></button>
-                <div className="flex items-baseline gap-2">
-                  <span className="w-1.5 h-1.5 rounded-full block bg-neutral-300"></span>
-                  <span className="text-sm text-neutral-800">이번 주말 방 청소</span>
-                </div>
-              </div>
-              <button className="text-neutral-300 hover:text-neutral-500 hidden group-hover:block"><X size={14} /></button>
-            </div>
-
-            <div className="flex items-center justify-between py-3 group">
-              <div className="flex items-center gap-3">
-                <button className="text-neutral-300 hover:text-neutral-900"><Square size={18} /></button>
-                <div className="flex items-baseline gap-2">
-                  <span style={{ backgroundColor: sophisticatedColors[3].hex }} className="w-1.5 h-1.5 rounded-full block"></span>
-                  <span className="text-sm text-neutral-800">신용카드 명세서 확인</span>
-                </div>
-              </div>
-              <span className="text-xs font-mono text-neutral-400">07-20</span>
-            </div>
-
-            <div className="flex items-center justify-between py-3 group">
-              <div className="flex items-center gap-3">
-                <button className="text-neutral-300 hover:text-neutral-900"><Square size={18} /></button>
-                <span className="text-sm text-neutral-800">포트폴리오 업데이트</span>
-              </div>
-            </div>
+            ))}
           </div>
 
-          {/* 완료 목록 분리 처리 */}
           <div className="space-y-2 pt-2">
-            <p className="text-xs text-neutral-400 font-mono">완료됨 — 2</p>
+            <p className="text-xs text-neutral-400 font-mono">완료됨 — {(todos || []).filter(t => t.completed).length}</p>
             <div className="divide-y divide-neutral-100">
-              <div className="flex items-center gap-3 py-2">
-                <button className="text-neutral-900"><CheckSquare size={18} /></button>
-                <span className="text-sm text-neutral-400 line-through">보험 서류 제출</span>
-              </div>
-              <div className="flex items-center gap-3 py-2">
-                <button className="text-neutral-900"><CheckSquare size={18} /></button>
-                <span className="text-sm text-neutral-400 line-through">주간 식료품 구매</span>
-              </div>
+              {/* 완료된 일 */}
+              {(todos || []).filter(t => t.completed).map(todo => (
+                <div key={todo.id} className="flex items-center justify-between py-2 group">
+                  <div className="flex items-center gap-3">
+                    <button onClick={() => handleToggleTodo(todo.id, todo.completed)} className="text-neutral-950"><CheckSquare size={18} /></button>
+                    <span className="text-sm text-neutral-400 line-through">{todo.title}</span>
+                  </div>
+                  <button onClick={() => handleDeleteTodo(todo.id)} className="text-neutral-300 hover:text-neutral-500 hidden group-hover:block"><X size={14} /></button>
+                </div>
+              ))}
             </div>
           </div>
 
-          {/* 하단 로그아웃 버튼 배치 */}
           <div className="pt-8">
-            <button
-              onClick={() => supabase.auth.signOut()}
-              className="text-xs text-neutral-400 hover:text-neutral-900 underline underline-offset-4"
-            >
-              로그아웃 계정: {session.user.email}
+            <button onClick={() => supabase.auth.signOut()} className="text-xs text-neutral-400 hover:text-neutral-900 underline underline-offset-4">
+              로그아웃 계정: {session?.user?.email}
             </button>
           </div>
         </div>
       </div>
 
-      {/* 3. [요청 핵심 반영] 화면 하단 고정형 반투명 AI 입력 바 */}
+      {/* 3. 화면 하단 고정형 AI 입력 바 */}
       <div className="fixed bottom-0 left-0 right-0 bg-white/85 backdrop-blur-md border-t border-neutral-200 py-4 px-8 z-40">
         <div className="max-w-7xl mx-auto flex gap-2 items-center">
-          
-          {/* 마이크 음성 입력 아이콘 버튼 */}
-          <button 
-            type="button"
-            className="p-2.5 text-neutral-500 hover:text-neutral-900 border border-neutral-300 rounded-sm bg-white active:bg-neutral-50 transition-colors"
-            title="음성 인식 시작"
-          >
-            <Mic size={18} />
-          </button>
-
-          {/* 인풋 영역 */}
-          <input
-            type="text"
-            value={newScheduleInput}
-            onChange={(e) => setNewScheduleInput(e.target.value)}
-            placeholder="대충 말해도 괜찮아요 - 예: 다음 주 주말 방 청소"
-            className="flex-1 rounded-sm border border-neutral-300 bg-white px-4 py-2.5 text-sm text-neutral-950 outline-none focus:border-neutral-900 transition-colors"
-          />
-
-          {/* 분석 버튼 */}
-          <button 
-            onClick={() => {
-              if(newScheduleInput.trim()){ setShowAiModal(true); setNewScheduleInput(''); }
-            }}
-            className="rounded-sm bg-neutral-950 px-5 py-2.5 text-sm font-medium text-white hover:opacity-90 active:opacity-100 disabled:opacity-40 transition-opacity"
-            disabled={!newScheduleInput.trim()}
-          >
-            분석
+          <button type="button" className="p-2.5 text-neutral-500 hover:text-neutral-900 border border-neutral-300 rounded-sm bg-white active:bg-neutral-50 transition-colors"><Mic size={18} /></button>
+          <input type="text" value={newScheduleInput} onChange={(e) => setNewScheduleInput(e.target.value)} onKeyDown={(e) => { if(e.key === 'Enter' && !isAnalyzing) handleAnalyze(); }} placeholder="대충 말해도 괜찮아요 - 예: 다음 주 주말 방 청소" className="flex-1 rounded-sm border border-neutral-300 bg-white px-4 py-2.5 text-sm text-neutral-950 outline-none focus:border-neutral-900 transition-colors" disabled={isAnalyzing} />
+          <button onClick={handleAnalyze} className="rounded-sm bg-neutral-950 px-5 py-2.5 text-sm font-medium text-white hover:opacity-90 active:opacity-100 disabled:opacity-40 transition-all flex items-center gap-2" disabled={!newScheduleInput.trim() || isAnalyzing}>
+            {isAnalyzing && <Loader2 size={14} className="animate-spin" />}
+            <span>{isAnalyzing ? '분석 중' : '분석'}</span>
           </button>
         </div>
       </div>
 
-      {/* 4. AI 파싱 확인 모달 오버레이 */}
+      {/* 4. AI 파싱 결과 확인 모달 */}
       {showAiModal && (
         <div className="fixed inset-0 bg-neutral-900/40 backdrop-blur-xs flex items-center justify-center p-4 z-50">
           <div className="w-full max-w-md bg-white border border-neutral-200 p-6 space-y-6 rounded-none shadow-none">
-            <div className="space-y-1">
-              <span className="text-xs font-medium text-neutral-400 block">AI 분석 결과</span>
-              <h4 className="text-sm font-bold text-neutral-950">"내일 3시 알바 면접" 을 분석했어요</h4>
-            </div>
-
+            <div className="space-y-1"><span className="text-xs font-medium text-neutral-400 block">AI 분석 결과</span><h4 className="text-sm font-bold text-neutral-950">분석된 정밀 데이터를 확인해 주세요</h4></div>
             <div className="space-y-4">
-              <div className="space-y-1.5">
-                <label className="block text-xs font-medium text-neutral-600">제목</label>
-                <input type="text" defaultValue="알바 면접" className="w-full border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-950 outline-none focus:border-neutral-900 rounded-sm" />
-              </div>
-
+              <div className="space-y-1.5"><label className="block text-xs font-medium text-neutral-600">제목</label><input type="text" value={parsedResult.title} onChange={(e) => setParsedResult(prev => ({ ...prev, title: e.target.value }))} className="w-full border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-950 outline-none focus:border-neutral-900 rounded-sm" /></div>
               <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <label className="block text-xs font-medium text-neutral-600">날짜</label>
-                  <input type="text" defaultValue="2026.07.18" className="w-full border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-950 outline-none focus:border-neutral-900 rounded-sm" />
-                </div>
-                <div className="space-y-1.5">
-                  <label className="block text-xs font-medium text-neutral-600">시간</label>
-                  <input type="text" defaultValue="15:00" className="w-full border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-950 outline-none focus:border-neutral-900 rounded-sm" />
-                </div>
+                <div className="space-y-1.5"><label className="block text-xs font-medium text-neutral-600">날짜</label><input type="text" value={parsedResult.date} onChange={(e) => setParsedResult(prev => ({ ...prev, date: e.target.value }))} className="w-full border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-950 outline-none focus:border-neutral-900 rounded-sm" /></div>
+                <div className="space-y-1.5"><label className="block text-xs font-medium text-neutral-600">시간 (비워둘 시 To-do로 변경)</label><input type="text" value={parsedResult.time || ''} onChange={(e) => setParsedResult(prev => ({ ...prev, time: e.target.value, isTodo: !e.target.value }))} placeholder="예: 15:00" className="w-full border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-950 outline-none focus:border-neutral-900 rounded-sm" /></div>
               </div>
-
-              {/* 카테고리 선택 */}
               <div className="space-y-2 pt-1">
-                <label className="block text-xs font-medium text-neutral-600 mb-2">카테고리</label>
+                <label className="block text-xs font-medium text-neutral-600 mb-2">카테고리: <span className="font-bold text-neutral-800">{parsedResult.category}</span></label>
                 <div className="flex gap-2">
-                  <span className="w-8 h-8 rounded-full flex items-center justify-center border border-neutral-950 cursor-pointer">
-                    <CheckSquare size={14} className="text-neutral-950" />
-                  </span>
                   {sophisticatedColors.map(color => (
-                    <span 
-                      key={color.hex} 
-                      style={{ backgroundColor: color.hex }} 
-                      className="w-8 h-8 rounded-full border border-neutral-100 cursor-pointer transition-transform hover:scale-110 active:scale-95" 
-                      title={color.name}
-                    ></span>
+                    <button key={color.hex} type="button" onClick={() => setParsedResult(prev => ({ ...prev, category: color.name, color: color.hex }))} style={{ backgroundColor: color.hex }} className={`w-8 h-8 rounded-full border cursor-pointer transition-all hover:scale-110 active:scale-95 ${parsedResult.category === color.name ? 'ring-2 ring-neutral-950 ring-offset-2 scale-105' : 'border-neutral-100'}`} title={color.name} />
                   ))}
-                  <span className="w-8 h-8 rounded-full bg-neutral-950 flex items-center justify-center cursor-pointer border border-neutral-950">
-                    <Plus size={14} className="text-white" />
-                  </span>
                 </div>
               </div>
             </div>
-
             <div className="grid grid-cols-2 gap-3 pt-2">
-              <button onClick={() => setShowAiModal(false)} className="border border-neutral-300 py-2 text-sm font-medium text-neutral-900 hover:bg-neutral-50 rounded-sm">
-                취소
-              </button>
-              <button onClick={() => setShowAiModal(false)} className="bg-neutral-950 py-2 text-sm font-medium text-white hover:opacity-90 rounded-sm">
-                최종 저장
-              </button>
+              <button onClick={() => setShowAiModal(false)} className="border border-neutral-300 py-2 text-sm font-medium text-neutral-900 hover:bg-neutral-50 rounded-sm">취소</button>
+              <button onClick={handleSaveResult} className="bg-neutral-950 py-2 text-sm font-medium text-white hover:opacity-90 rounded-sm">최종 저장</button>
             </div>
           </div>
         </div>
