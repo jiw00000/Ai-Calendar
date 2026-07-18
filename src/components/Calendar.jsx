@@ -2,7 +2,7 @@ import React from 'react'
 import { ChevronLeft, ChevronRight, Trash2 } from 'lucide-react'
 
 export default function Calendar({ events, selectedDate, setSelectedDate, onDeleteEvent }) {
-  // 2026년 7월 기준 달력 그리드 기본 뼈대 데이터
+  // 💡 [변경 완료] 17일, 18일 뒤에 붙어있던 수동 'isToday' 표시를 완전히 지웠습니다!
   const baseCalendarDays = [
     { day: 29, isCurrentMonth: false, dateStr: '2026-06-29' },
     { day: 30, isCurrentMonth: false, dateStr: '2026-06-30' },
@@ -22,8 +22,8 @@ export default function Calendar({ events, selectedDate, setSelectedDate, onDele
     { day: 14, isCurrentMonth: true, dateStr: '2026-07-14' },
     { day: 15, isCurrentMonth: true, dateStr: '2026-07-15' },
     { day: 16, isCurrentMonth: true, dateStr: '2026-07-16' },
-    { day: 17, isCurrentMonth: true, dateStr: '2026-07-17', isToday: true },
-    { day: 18, isCurrentMonth: true, dateStr: '2026-07-18' },
+    { day: 17, isCurrentMonth: true, dateStr: '2026-07-17' },
+    { day: 18, isCurrentMonth: true, dateStr: '2026-07-18' }, 
     { day: 19, isCurrentMonth: true, dateStr: '2026-07-19' },
     { day: 20, isCurrentMonth: true, dateStr: '2026-07-20' },
     { day: 21, isCurrentMonth: true, dateStr: '2026-07-21' },
@@ -70,6 +70,9 @@ export default function Calendar({ events, selectedDate, setSelectedDate, onDele
           
           const isSelected = selectedDate === cell.dateStr;
 
+          {/* 💡 [변경 완료] 실시간으로 컴퓨터의 오늘 날짜('YYYY-MM-DD')와 이 칸의 날짜가 같은지 확인합니다! */}
+          const isToday = cell.dateStr === new Date().toLocaleDateString('sv-SE');
+
           return (
             <div 
               key={idx} 
@@ -79,7 +82,8 @@ export default function Calendar({ events, selectedDate, setSelectedDate, onDele
               } ${isSelected ? 'bg-neutral-950/[0.03] ring-1 ring-inset ring-neutral-950' : 'hover:bg-neutral-50/50'}`}
             >
               <div className="flex justify-between items-center">
-                {cell.isToday ? (
+                {/* 💡 [변경 완료] cell.isToday 대신 실시간으로 계산된 변수 isToday를 바라봅니다. */}
+                {isToday ? (
                   <span className="w-5 h-5 flex items-center justify-center bg-neutral-950 text-white rounded-full font-bold text-[10px]">{cell.day}</span>
                 ) : (
                   <span className={isSelected ? 'font-bold text-neutral-950' : ''}>
@@ -130,10 +134,9 @@ export default function Calendar({ events, selectedDate, setSelectedDate, onDele
                 </span>
                 <span className="text-neutral-800 font-medium">{event.title}</span>
                 
-                {/* 🗑️ [4번 삭제 버튼 탑재!] 마우스 오버 시 나타나는 트렌디한 무채색 쓰레기통 버튼 */}
                 <button 
                   onClick={(e) => {
-                    e.stopPropagation(); // 카드 선택 클릭 방지
+                    e.stopPropagation();
                     onDeleteEvent(event.id);
                   }}
                   className="text-neutral-300 hover:text-neutral-600 ml-auto transition-all p-1 cursor-pointer opacity-0 group-hover:opacity-100"

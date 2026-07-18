@@ -19,8 +19,8 @@ export default function App() {
   const [events, setEvents] = useState([])
   const [todos, setTodos] = useState([])
 
-  // 현재 사용자가 선택한 날짜 상태 (기본값: 오늘 17일)
-  const [selectedDate, setSelectedDate] = useState('2026-07-17')
+  // sv-SE 포맷을 쓰면 'YYYY-MM-DD' 형태로 오늘 날짜가 자동 추출됩니다!
+const [selectedDate, setSelectedDate] = useState(new Date().toLocaleDateString('sv-SE'))
 
   // 입력 및 AI 모달 상태
   const [newScheduleInput, setNewScheduleInput] = useState('')
@@ -200,7 +200,7 @@ export default function App() {
     <div className="min-h-screen bg-white text-neutral-900 font-sans antialiased px-8 pt-6 pb-32 max-w-7xl mx-auto space-y-8 relative">
       
       {/* 1. 오늘의 비서 브리핑 배너 */}
-      <BriefingBanner />
+      <BriefingBanner events={events} userEmail={session?.user?.email} />
 
       {dbLoading && <div className="text-left text-[10px] font-mono text-neutral-400 animate-pulse tracking-widest">SYNCING DATABASE...</div>}
 
