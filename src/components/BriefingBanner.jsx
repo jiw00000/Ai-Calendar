@@ -83,7 +83,7 @@ export default function BriefingBanner({ events, userEmail }) {
       <div className="space-y-3">
         <div className="flex justify-between items-center">
           <p className="text-xs font-semibold text-neutral-400 tracking-wider flex items-center gap-2">
-            오늘의 AI 브리핑
+            오늘의 브리핑
             {weather.loading && <Loader2 size={10} className="animate-spin text-neutral-300" />}
           </p>
           
