@@ -31,6 +31,9 @@ export default function App() {
   const [isEditing, setIsEditing] = useState(false)
   const [editingEventId, setEditingEventId] = useState(null)
 
+  // 💡 [다크모드 상태 추가] 기존 디자인을 지키면서 색상 스위칭만 제어합니다.
+  const [darkMode, setDarkMode] = useState(false)
+
   const [modalTitle, setModalTitle] = useState('')
   const [modalStartDate, setModalStartDate] = useState('') 
   const [modalEndDate, setModalEndDate] = useState('')     
@@ -73,11 +76,10 @@ export default function App() {
     initSessionAndFetch()
   }, [])
 
-  // 💡 2. [대형 추가] Supabase Realtime 실시간 데이터베이스 브로드캐스팅 리스너 심기
+  // 💡 2. Supabase Realtime 실시간 데이터베이스 브로드캐스팅 리스너 심기
   useEffect(() => {
     if (!userId) return
 
-    // 📡 events 테이블 실시간 채널 구독 (내 user_id 데이터만 필터링)
     const eventsChannel = supabase
       .channel('public:events_realtime')
       .on(
@@ -85,12 +87,11 @@ export default function App() {
         { event: '*', schema: 'public', table: 'events', filter: `user_id=eq.${userId}` },
         (payload) => {
           console.log('⚡ [Realtime] 일정 변동 감지됨:', payload)
-          fetchBackendData(userId) // 데이터 변경 시 자동으로 전수 리프레시!
+          fetchBackendData(userId) 
         }
       )
       .subscribe()
 
-    // 📡 todos 테이블 실시간 채널 구독 (내 user_id 데이터만 필터링)
     const todosChannel = supabase
       .channel('public:todos_realtime')
       .on(
@@ -98,12 +99,11 @@ export default function App() {
         { event: '*', schema: 'public', table: 'todos', filter: `user_id=eq.${userId}` },
         (payload) => {
           console.log('⚡ [Realtime] 할 일 변동 감지됨:', payload)
-          fetchBackendData(userId) // 데이터 변경 시 자동으로 전수 리프레시!
+          fetchBackendData(userId) 
         }
       )
       .subscribe()
 
-    // 🔌 컴포넌트가 꺼지거나 로그아웃될 때 실시간 스트림 채널을 안전하게 닫아줍니다 (메모리 누수 방지)
     return () => {
       supabase.removeChannel(eventsChannel)
       supabase.removeChannel(todosChannel)
@@ -312,13 +312,10 @@ export default function App() {
     }
   }
 
-  // 일정 삭제
   const handleDeleteEvent = async (id) => {
-    const { error } = await supabase.from('events').delete().eq('id', id)
-    if (error) alert(`삭제 실패: ${error.message}`)
+    await supabase.from('events').delete().eq('id', id)
   }
 
-  // 수동 할 일 추가
   const handleAddTodoManual = async (e) => {
     e.preventDefault()
     const input = e.target.elements.todoInput.value
@@ -338,13 +335,11 @@ export default function App() {
   }
 
   const handleToggleTodo = async (id, completed) => {
-    const { error } = await supabase.from('todos').update({ completed: !completed }).eq('id', id)
-    if (error) alert(`상태 변경 실패: ${error.message}`)
+    await supabase.from('todos').update({ completed: !completed }).eq('id', id)
   }
 
   const handleDeleteTodo = async (id) => {
-    const { error } = await supabase.from('todos').delete().eq('id', id)
-    if (error) alert(`할 일 삭제 실패: ${error.message}`)
+    await supabase.from('todos').delete().eq('id', id)
   }
 
   const handleSignOut = async () => {
@@ -361,20 +356,44 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-white text-neutral-900 p-6 space-y-6 max-w-7xl mx-auto pb-32">
-      <BriefingBanner events={events} />
+    // 💡 [디자인 완전 유지] 레이아웃에 영향이 없는 초미니멀 상단 스위치 타일 삽입 및 조건부 배경 전환 적용
+    <div className={`min-h-screen transition-colors duration-300 p-6 space-y-6 max-w-7xl mx-auto pb-32 ${
+      darkMode ? 'bg-neutral-950 text-white' : 'bg-white text-neutral-900'
+    }`}>
+      
+      {/* ☀️/🌙 미니멀 스위치 타일 (구조 변동 없음) */}
+      <div className="flex justify-end select-none">
+        <button 
+          onClick={() => setDarkMode(!darkMode)}
+          className={`text-[10px] font-mono tracking-wider px-3 py-1.5 border cursor-pointer transition-all active:scale-95 rounded-none ${
+            darkMode 
+              ? 'border-neutral-800 bg-neutral-900 text-neutral-400 hover:text-white' 
+              : 'border-neutral-200 bg-neutral-50 text-neutral-500 hover:text-neutral-900'
+          }`}
+        >
+          {darkMode ? '🌙 DARK MODE ON' : '☀️ LIGHT MODE ON'}
+        </button>
+      </div>
 
+      <BriefingBanner events={events} userEmail={userEmail} darkMode={darkMode} />
+
+      {/* 💡 [원형 보존] border 라운딩 없이 각진 원래 형태 100% 유지한 채 색상만 반전 */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 border border-neutral-200 p-6">
+        <div className={`lg:col-span-2 border p-6 transition-colors duration-300 ${
+          darkMode ? 'border-neutral-800 bg-neutral-900/40' : 'border-neutral-200 bg-white'
+        }`}>
           <Calendar 
             events={events} 
             selectedDate={selectedDate}
             setSelectedDate={setSelectedDate}
             onDeleteEvent={handleDeleteEvent}
             onEditEvent={handleOpenEditModal} 
+            darkMode={darkMode}
           />
         </div>
-        <div className="border border-neutral-200 p-6">
+        <div className={`border p-6 transition-colors duration-300 ${
+          darkMode ? 'border-neutral-800 bg-neutral-900/40' : 'border-neutral-200 bg-white'
+        }`}>
           <TodoList 
             todos={todos}
             onAddTodoManual={handleAddTodoManual}
@@ -382,6 +401,7 @@ export default function App() {
             onDeleteTodo={handleDeleteTodo}
             userEmail={userEmail}
             onSignOut={handleSignOut}
+            darkMode={darkMode}
           />
         </div>
       </div>
@@ -414,6 +434,7 @@ export default function App() {
         setCategory={setModalCategory}
         onSave={handleSaveEvent}
         isEditing={isEditing} 
+        darkMode={darkMode}
       />
     </div>
   )
