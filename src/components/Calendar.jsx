@@ -1,16 +1,13 @@
 import React, { useState } from 'react'
-import { ChevronLeft, ChevronRight, Trash2, ChevronDown } from 'lucide-react' // 💡 ChevronDown 추가
+import { ChevronLeft, ChevronRight, Trash2, ChevronDown } from 'lucide-react' 
 
 export default function Calendar({ events, selectedDate, setSelectedDate, onDeleteEvent }) {
-  // 1. 컴퓨터의 현재 날짜를 기준으로 최초 연/월 상태 설정
   const initialDate = new Date(selectedDate);
   const [currentYear, setCurrentYear] = useState(initialDate.getFullYear() || 2026);
   const [currentMonth, setCurrentMonth] = useState((initialDate.getMonth() + 1) || 7);
 
-  // 2024년부터 2040년까지의 미래 확장 년도 데이터
   const yearOptions = Array.from({ length: 2040 - 2024 + 1 }, (_, i) => 2024 + i);
 
-  // 2. 선택된 년/월에 맞게 42일(6주)의 달력 격자 데이터를 실시간 생성하는 함수
   const generateCalendarDays = (year, month) => {
     const firstDayInstance = new Date(year, month - 1, 1);
     const firstDayOfWeek = firstDayInstance.getDay();
@@ -38,7 +35,6 @@ export default function Calendar({ events, selectedDate, setSelectedDate, onDele
 
   const baseCalendarDays = generateCalendarDays(currentYear, currentMonth);
 
-  // 월 전환 핸들러 (이전 달)
   const handlePrevMonth = () => {
     if (currentMonth === 1) {
       setCurrentMonth(12);
@@ -48,7 +44,6 @@ export default function Calendar({ events, selectedDate, setSelectedDate, onDele
     }
   }
 
-  // 월 전환 핸들러 (다음 달)
   const handleNextMonth = () => {
     if (currentMonth === 12) {
       setCurrentMonth(1);
@@ -69,11 +64,8 @@ export default function Calendar({ events, selectedDate, setSelectedDate, onDele
       
       {/* 달력 상단 헤더 영역 */}
       <div className="flex justify-between items-center">
-        
-        {/* 💡 [디자인 대수정] 테두리 박스를 완전히 제거하고 글자 오른쪽에 아래 화살표 배치 */}
         <div className="flex items-center gap-5 text-base font-bold text-neutral-950 select-none">
           
-          {/* 년도 드롭다운 패키지 */}
           <div className="relative flex items-center group">
             <select 
               value={currentYear} 
@@ -84,11 +76,9 @@ export default function Calendar({ events, selectedDate, setSelectedDate, onDele
                 <option key={y} value={y}>{y}년</option>
               ))}
             </select>
-            {/* 텍스트 바로 오른쪽에 배치되는 미니멀 아래 화살표 */}
             <ChevronDown size={14} className="absolute right-0 text-neutral-400 group-hover:text-neutral-900 pointer-events-none transition-colors" />
           </div>
 
-          {/* 월 드롭다운 패키지 */}
           <div className="relative flex items-center group">
             <select 
               value={currentMonth} 
@@ -99,13 +89,11 @@ export default function Calendar({ events, selectedDate, setSelectedDate, onDele
                 <option key={m} value={m}>{m}월</option>
               ))}
             </select>
-            {/* 텍스트 바로 오른쪽에 배치되는 미니멀 아래 화살표 */}
             <ChevronDown size={14} className="absolute right-0 text-neutral-400 group-hover:text-neutral-900 pointer-events-none transition-colors" />
           </div>
 
         </div>
 
-        {/* 우측 월 이동 단축 버튼 */}
         <div className="flex items-center gap-3 text-neutral-400 text-xs font-mono select-none">
           <button onClick={handlePrevMonth} className="hover:text-neutral-900 cursor-pointer"><ChevronLeft size={16} /></button>
           <span className="tracking-widest w-8 text-center">{monthsEng[currentMonth - 1]}</span>
@@ -131,11 +119,11 @@ export default function Calendar({ events, selectedDate, setSelectedDate, onDele
             <div 
               key={idx} 
               onClick={() => setSelectedDate(cell.dateStr)}
-              className={`border-b border-r border-neutral-200 p-1.5 h-[104px] text-left text-xs font-mono space-y-1 cursor-pointer transition-colors relative select-none ${
+              className={`border-b border-r border-neutral-200 pt-2 pb-2 h-[104px] text-left text-xs font-mono flex flex-col cursor-pointer transition-colors relative select-none ${
                 cell.isCurrentMonth ? 'text-neutral-500' : 'text-neutral-300 bg-neutral-50/10'
               } ${isSelected ? 'bg-neutral-950/[0.03] ring-1 ring-inset ring-neutral-950' : 'hover:bg-neutral-50/50'}`}
             >
-              <div className="flex justify-between items-center">
+              <div className="px-2 flex justify-between items-center mb-1.5">
                 {isToday ? (
                   <span className="w-5 h-5 flex items-center justify-center bg-neutral-950 text-white rounded-full font-bold text-[10px]">{cell.day}</span>
                 ) : (
@@ -145,19 +133,43 @@ export default function Calendar({ events, selectedDate, setSelectedDate, onDele
                 )}
               </div>
               
-              <div className="space-y-0.5 overflow-hidden">
-                {matchingEvents.slice(0, 2).map(event => (
-                  <div 
-                    key={event.id} 
-                    style={{ borderColor: event.color }} 
-                    className="border-l-2 pl-1.5 py-0.5 text-[10px] leading-tight text-neutral-700 bg-neutral-50/50 break-all"
-                  >
-                    {event.title}
-                  </div>
-                ))}
-                {matchingEvents.length > 2 && (
-                  <div className="text-[9px] text-neutral-400 font-sans pl-1.5 pt-0.5">
-                    + {matchingEvents.length - 2}개 더
+              <div className="flex-1 flex flex-col gap-1 overflow-hidden justify-start">
+                {matchingEvents.slice(0, 3).map(event => {
+                  const isMulti = event.origStart && event.origEnd && (event.origStart !== event.origEnd);
+                  const isStart = event.date === event.origStart;
+                  const isEnd = event.date === event.origEnd;
+
+                  if (isMulti) {
+                    return (
+                      <div 
+                        key={event.id} 
+                        style={{ backgroundColor: event.color }} 
+                        // 💡 다른 일정과 완벽히 동일한 text-[10px] leading-tight text-neutral-700 스타일 동기화 수행
+                        className={`py-0.5 text-[10px] leading-tight text-neutral-700 truncate select-none transition-all ${
+                          isStart ? 'rounded-l-md ml-2 pl-2' : 'rounded-none ml-0 pl-1.5'
+                        } ${
+                          isEnd ? 'rounded-r-md mr-2 pr-2' : 'rounded-none mr-0 pr-1.5'
+                        }`}
+                      >
+                        {isStart || cell.day === 1 || idx % 7 === 0 ? event.title : "\u00A0"}
+                      </div>
+                    )
+                  }
+
+                  // 기준이 되는 일반 당일 일정 양식
+                  return (
+                    <div 
+                      key={event.id} 
+                      style={{ borderColor: event.color }} 
+                      className="mx-2 border-l-2 pl-1.5 py-0.5 text-[10px] leading-tight text-neutral-700 bg-neutral-50/50 break-all"
+                    >
+                      {event.title}
+                    </div>
+                  )
+                })}
+                {matchingEvents.length > 3 && (
+                  <div className="text-[9px] text-neutral-400 font-sans pl-2 pt-0.5">
+                    + {matchingEvents.length - 3}개 더
                   </div>
                 )}
               </div>

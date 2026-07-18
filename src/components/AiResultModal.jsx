@@ -5,11 +5,13 @@ export default function AiResultModal({
   onClose, 
   title, 
   setTitle, 
-  date, 
-  setDate, 
+  startDate,      
+  setStartDate, 
+  endDate,        
+  setEndDate,     
   time, 
   setTime,
-  duration,       
+  duration,       // 💡 당일 일정의 정밀 추적을 위해 화려하게 복귀!
   setDuration,    
   category, 
   setCategory, 
@@ -17,7 +19,6 @@ export default function AiResultModal({
 }) {
   if (!isOpen) return null
 
-  // 카테고리 컬러칩 리스트 정의
   const colors = [
     { name: '민트', class: 'bg-[#76cca6]' },
     { name: '코랄', class: 'bg-[#e77471]' },
@@ -52,18 +53,30 @@ export default function AiResultModal({
             />
           </div>
 
-          {/* 2열: 날짜 필드 (가로 너비를 여유 있게 단독 배치) */}
-          <div className="space-y-1.5">
-            <label className="text-xs font-bold text-neutral-500">날짜</label>
-            <input 
-              type="date"
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-              className="w-full border border-neutral-200 rounded-lg px-4 py-3 text-sm text-neutral-900 focus:border-neutral-900 outline-none font-medium font-mono transition-all"
-            />
+          {/* 2열: 기간형 일정을 위한 날짜 연동 그리드 */}
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-neutral-500">시작 날짜</label>
+              <input 
+                type="date"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+                className="w-full border border-neutral-200 rounded-lg px-4 py-3 text-sm text-neutral-900 focus:border-neutral-900 outline-none font-medium font-mono transition-all"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-neutral-500">종료 날짜</label>
+              <input 
+                type="date"
+                value={endDate}
+                min={startDate} 
+                onChange={(e) => setEndDate(e.target.value)}
+                className="w-full border border-neutral-200 rounded-lg px-4 py-3 text-sm text-neutral-900 focus:border-neutral-900 outline-none font-medium font-mono transition-all"
+              />
+            </div>
           </div>
 
-          {/* 💡 3열 [구조 개선]: 시작 시간과 진행 시간을 50:50 세트로 묶어 밸런스 최적화 */}
+          {/* 💡 3열: 당일 시간 단위 일정을 위한 정밀 시각/진행시간 그리드 */}
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1.5">
               <label className="text-xs font-bold text-neutral-500">시작 시간 (비워둘 시 To-do)</label>
@@ -74,11 +87,9 @@ export default function AiResultModal({
                 className="w-full border border-neutral-200 rounded-lg px-4 py-3 text-sm text-neutral-900 focus:border-neutral-900 outline-none font-medium font-mono transition-all"
               />
             </div>
-            
             <div className="space-y-1.5">
               <label className="text-xs font-bold text-neutral-500">진행 시간</label>
               <div className="relative flex items-center">
-                {/* 💡 [우측 화살표 완전 제거 스크립트 추가] */}
                 <input 
                   type="number"
                   step="0.5"
@@ -86,6 +97,7 @@ export default function AiResultModal({
                   max="24"
                   value={duration || 1}
                   onChange={(e) => setDuration(Number(e.target.value))}
+                  // 💡 화살표 스핀 마크를 강제 무력화하고 우측 여백 패딩을 완벽 조율하여 글자 겹침을 완전 차단
                   className="w-full border border-neutral-200 rounded-lg px-4 py-3 text-sm text-neutral-900 focus:border-neutral-900 outline-none font-bold font-mono transition-all pr-20 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                 />
                 <span className="absolute right-4 text-xs font-bold text-neutral-400 font-sans pointer-events-none">
@@ -95,7 +107,7 @@ export default function AiResultModal({
             </div>
           </div>
 
-          {/* 4열: 카테고리 컬러칩 영역 */}
+          {/* 카테고리 컬러칩 영역 */}
           <div className="space-y-2 pt-1">
             <label className="text-xs font-bold text-neutral-500">
               카테고리: <span className="text-neutral-800 font-extrabold">{category}</span>
@@ -117,7 +129,7 @@ export default function AiResultModal({
 
         </div>
 
-        {/* 하단 취소 / 저장 더블 액션 버튼 바 */}
+        {/* 하단 버튼 바 */}
         <div className="grid grid-cols-2 gap-3 pt-2">
           <button
             onClick={onClose}

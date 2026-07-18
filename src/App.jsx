@@ -29,9 +29,10 @@ export default function App() {
   const [isModalOpen, setIsModalOpen] = useState(false)
   
   const [modalTitle, setModalTitle] = useState('')
-  const [modalDate, setModalDate] = useState('')
+  const [modalStartDate, setModalStartDate] = useState('') 
+  const [modalEndDate, setModalEndDate] = useState('')     
   const [modalTime, setModalTime] = useState('')
-  const [modalDuration, setModalDuration] = useState(1)
+  const [modalDuration, setModalDuration] = useState(1) 
   const [modalCategory, setModalCategory] = useState('딥 테일')
   const [modalIsTodo, setModalIsTodo] = useState(false)
 
@@ -68,7 +69,7 @@ export default function App() {
     initSessionAndFetch()
   }, [])
 
-  // 📥 [데이터 변환 로드] DB의 start_time, end_time을 프론트엔드가 이해하는 date, time, duration으로 쪼갭니다.
+  // 📥 백엔드 타임스탬프 로드 및 달력 분할 매핑 (연박 추적기 탑재)
   const fetchBackendData = async (uid) => {
     const { data: eventsData, error: eventsError } = await supabase
       .from('events')
@@ -78,34 +79,41 @@ export default function App() {
     if (eventsError) {
       console.error("일정 불러오기 실패:", eventsError.message)
     } else {
-      // 💡 데이터 포맷 가공 변환기 실행
-      const parsedEvents = (eventsData || []).map(e => {
-        if (!e.start_time) return { ...e, date: '', time: '', duration: 1 }
+      const parsedEvents = []
+      
+      ;(eventsData || []).forEach(e => {
+        if (!e.start_time) return
         
-        const startDateObj = new Date(e.start_time)
-        const endDateObj = e.end_time ? new Date(e.end_time) : new Date(startDateObj.getTime() + 60 * 60 * 1000)
+        const start = new Date(e.start_time)
+        const end = e.end_time ? new Date(e.end_time) : new Date(start.getTime() + 60 * 60 * 1000)
         
-        // 날짜 파싱 (YYYY-MM-DD)
-        const yyyy = startDateObj.getFullYear()
-        const mm = String(startDateObj.getMonth() + 1).padStart(2, '0')
-        const dd = String(startDateObj.getDate()).padStart(2, '0')
-        const date = `${yyyy}-${mm}-${dd}`
+        let current = new Date(start.getFullYear(), start.getMonth(), start.getDate())
+        const endCeil = new Date(end.getTime() - 1)
+        const limit = new Date(endCeil.getFullYear(), endCeil.getMonth(), endCeil.getDate())
         
-        // 시간 파싱 (HH:MM)
-        const time = String(startDateObj.getHours()).padStart(2, '0') + ':' + String(startDateObj.getMinutes()).padStart(2, '0')
+        const origStartStr = start.toLocaleDateString('sv-SE')
+        const origEndStr = limit.toLocaleDateString('sv-SE')
         
-        // 진행 시간 계산 (시간 단위)
-        const duration = Math.max(0.5, (endDateObj - startDateObj) / (1000 * 60 * 60))
-        
-        return {
-          id: e.id,
-          title: e.title,
-          category: e.category,
-          color: e.color,
-          user_id: e.user_id,
-          date,
-          time,
-          duration
+        while (current <= limit) {
+          const dateStr = current.toLocaleDateString('sv-SE')
+          const timeStr = String(start.getHours()).padStart(2, '0') + ':' + String(start.getMinutes()).padStart(2, '0')
+          
+          parsedEvents.push({
+            id: e.id, 
+            title: e.title,
+            category: e.category,
+            color: e.color,
+            user_id: e.user_id,
+            date: dateStr,
+            time: timeStr === '00:00' ? '종일' : timeStr,
+            duration: Math.max(0.5, (end - start) / (1000 * 60 * 60)),
+            
+            // 💡 [여기가 추가됨] 연박 일정을 달력에서 한 줄로 이어지게 만들기 위한 메타데이터 주입
+            origStart: origStartStr,
+            origEnd: origEndStr
+          })
+          
+          current.setDate(current.getDate() + 1)
         }
       })
       setEvents(parsedEvents)
@@ -125,12 +133,33 @@ export default function App() {
     setIsAnalyzing(true)
     try {
       const data = await parseScheduleWithAI(newScheduleInput)
+      
       setModalTitle(data.title || '')
-      setModalDate(data.date || '')
+      setModalStartDate(data.date || '')
       setModalTime(data.time || '')
-      setModalDuration(data.duration || 1)
       setModalCategory(data.category || '딥 테일')
       setModalIsTodo(data.isTodo || false)
+      setModalDuration(data.duration || 1) 
+
+      if (data.date) {
+        const startIso = `${data.date}T${data.time || '00:00'}:00`
+        const startDateObj = new Date(startIso)
+        const durationHours = data.duration || 1
+        const endDateObj = new Date(startDateObj.getTime() + durationHours * 60 * 60 * 1000)
+
+        let displayEndDate = endDateObj
+        if (durationHours >= 24 && (!data.time || data.time === '00:00')) {
+          displayEndDate = new Date(endDateObj.getTime() - 24 * 60 * 60 * 1000)
+        }
+
+        const yyyy = displayEndDate.getFullYear()
+        const mm = String(displayEndDate.getMonth() + 1).padStart(2, '0')
+        const dd = String(displayEndDate.getDate()).padStart(2, '0')
+        setModalEndDate(`${yyyy}-${mm}-${dd}`)
+      } else {
+        setModalEndDate(data.date || '')
+      }
+
       setIsModalOpen(true)
     } catch (error) {
       alert(`AI 분석 실패: ${error.message}`)
@@ -139,37 +168,34 @@ export default function App() {
     }
   }
 
-  // 📤 [데이터 변환 저장] 저장할 때는 다시 start_time과 end_time 타임스탬프로 합쳐서 날립니다.
+  // 저장 처리
   const handleSaveEvent = async () => {
     const color = categoryColors[modalCategory] || '#DBCBBD'
-
-    if (!userId) {
-      alert("로그인 정보가 유실되었습니다.")
-      return
-    }
+    if (!userId) return
 
     try {
       if (modalIsTodo) {
         const newTodo = {
           title: modalTitle,
-          date: modalDate,
+          date: modalStartDate,
           completed: false,
           color,
           user_id: userId
         }
-        
         const { data, error } = await supabase.from('todos').insert([newTodo]).select()
         if (error) throw error 
         if (data && data.length > 0) setTodos((prev) => [...prev, data[0]])
       } else {
-        // 💡 프론트엔드의 date + time 문자열을 조합해 Date 객체 생성
-        const startIsoString = `${modalDate}T${modalTime || '00:00'}:00`
+        const startIsoString = `${modalStartDate}T${modalTime || '00:00'}:00`
         const startDateObj = new Date(startIsoString)
         
-        // 시작 시간에 duration(시간 단위)을 더해 종료 시간 객체 생성
-        const endDateObj = new Date(startDateObj.getTime() + Number(modalDuration) * 60 * 60 * 1000)
+        let endDateObj;
+        if (modalStartDate === modalEndDate) {
+          endDateObj = new Date(startDateObj.getTime() + Number(modalDuration) * 60 * 60 * 1000)
+        } else {
+          endDateObj = new Date(`${modalEndDate}T${modalTime || '23:59'}:59`)
+        }
 
-        // Supabase 테이블 양식에 완벽 정렬 매칭
         const newEventForDB = {
           title: modalTitle,
           start_time: startDateObj.toISOString(),
@@ -179,28 +205,15 @@ export default function App() {
           user_id: userId
         }
 
-        const { data, error } = await supabase.from('events').insert([newEventForDB]).select()
+        const { error } = await supabase.from('events').insert([newEventForDB]).select()
         if (error) throw error 
         
-        if (data && data.length > 0) {
-          // 로컬 상태에는 캘린더가 이해할 수 있는 규격으로 복원해서 업로드
-          const newEventForState = {
-            id: data[0].id,
-            title: modalTitle,
-            date: modalDate,
-            time: modalTime || null,
-            duration: Number(modalDuration),
-            category: modalCategory,
-            color
-          }
-          setEvents((prev) => [...prev, newEventForState])
-        }
+        await fetchBackendData(userId)
       }
       
       setIsModalOpen(false)
       setNewScheduleInput('')
     } catch (error) {
-      console.error("Supabase 저장 실패:", error)
       alert(`❌ 데이터베이스 저장 실패!\n원인: ${error.message}`)
     }
   }
@@ -294,12 +307,14 @@ export default function App() {
         onClose={() => setIsModalOpen(false)}
         title={modalTitle}
         setTitle={setModalTitle}
-        date={modalDate}
-        setDate={setModalDate}
+        startDate={modalStartDate}
+        setStartDate={setModalStartDate}
+        endDate={modalEndDate}
+        setEndDate={setModalEndDate}
         time={modalTime}
         setTime={setModalTime}
-        duration={modalDuration}
-        setDuration={setModalDuration}
+        duration={modalDuration}       
+        setDuration={setModalDuration} 
         category={modalCategory}
         setCategory={setModalCategory}
         onSave={handleSaveEvent}
