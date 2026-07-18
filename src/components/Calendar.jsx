@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { ChevronLeft, ChevronRight, Trash2, ChevronDown } from 'lucide-react' 
 
-export default function Calendar({ events, selectedDate, setSelectedDate, onDeleteEvent }) {
+export default function Calendar({ events, selectedDate, setSelectedDate, onDeleteEvent, onEditEvent }) {
   const initialDate = new Date(selectedDate);
   const [currentYear, setCurrentYear] = useState(initialDate.getFullYear() || 2026);
   const [currentMonth, setCurrentMonth] = useState((initialDate.getMonth() + 1) || 7);
@@ -19,10 +19,10 @@ export default function Calendar({ events, selectedDate, setSelectedDate, onDele
       const currentCellDate = new Date(startDate);
       currentCellDate.setDate(startDate.getDate() + i);
       
-      const y = currentCellDate.getFullYear();
-      const m = String(currentCellDate.getMonth() + 1).padStart(2, '0');
+      const y = currentYear;
+      const m = String(currentMonth).padStart(2, '0');
       const d = String(currentCellDate.getDate()).padStart(2, '0');
-      const dateStr = `${y}-${m}-${d}`;
+      const dateStr = `${currentCellDate.getFullYear()}-${String(currentCellDate.getMonth() + 1).padStart(2, '0')}-${d}`;
 
       days.push({
         day: currentCellDate.getDate(),
@@ -144,8 +144,13 @@ export default function Calendar({ events, selectedDate, setSelectedDate, onDele
                       <div 
                         key={event.id} 
                         style={{ backgroundColor: event.color }} 
-                        // 💡 다른 일정과 완벽히 동일한 text-[10px] leading-tight text-neutral-700 스타일 동기화 수행
-                        className={`py-0.5 text-[10px] leading-tight text-neutral-700 truncate select-none transition-all ${
+                        // 💡 [수정 트리거 추가] 달력 위의 연박 띠를 클릭해도 모달이 열립니다.
+                        onClick={(e) => {
+                          e.stopPropagation(); // 셀 클릭 이벤트 전파 차단
+                          if(onEditEvent) onEditEvent(event);
+                        }}
+                        className="py-0.5 text-[10px] leading-tight text-neutral-700 truncate select-none transition-all hover:brightness-95 active:scale-[0.98] rounded-none ml-0 pl-1.5 mr-0 pr-1.5"
+                        className={`py-0.5 text-[10px] leading-tight text-neutral-700 truncate select-none transition-all hover:brightness-95 active:scale-[0.98] ${
                           isStart ? 'rounded-l-md ml-2 pl-2' : 'rounded-none ml-0 pl-1.5'
                         } ${
                           isEnd ? 'rounded-r-md mr-2 pr-2' : 'rounded-none mr-0 pr-1.5'
@@ -156,12 +161,16 @@ export default function Calendar({ events, selectedDate, setSelectedDate, onDele
                     )
                   }
 
-                  // 기준이 되는 일반 당일 일정 양식
                   return (
                     <div 
                       key={event.id} 
-                      style={{ borderColor: event.color }} 
-                      className="mx-2 border-l-2 pl-1.5 py-0.5 text-[10px] leading-tight text-neutral-700 bg-neutral-50/50 break-all"
+                      style={{ borderColor: event.color }}
+                      // 💡 [수정 트리거 추가] 달력 위의 일반 일정을 클릭해도 모달이 바로 열립니다.
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if(onEditEvent) onEditEvent(event);
+                      }}
+                      className="mx-2 border-l-2 pl-1.5 py-0.5 text-[10px] leading-tight text-neutral-700 bg-neutral-50/50 break-all hover:bg-neutral-100 transition-colors"
                     >
                       {event.title}
                     </div>
@@ -192,7 +201,12 @@ export default function Calendar({ events, selectedDate, setSelectedDate, onDele
         ) : (
           <div className="space-y-2.5 max-h-48 overflow-y-auto">
             {selectedDateEvents.map(event => (
-              <div key={event.id} className="flex items-center gap-3 py-1 text-sm group">
+              <div 
+                key={event.id} 
+                // 💡 [수정 트리거 추가] 하단 목록 행 전체에 마우스 포인터 스타일과 클릭 수정 핸들러 주입
+                onClick={() => { if(onEditEvent) onEditEvent(event); }}
+                className="flex items-center gap-3 py-1.5 px-2 text-sm group hover:bg-neutral-50 rounded-md transition-colors cursor-pointer"
+              >
                 <span style={{ backgroundColor: event.color || '#404040' }} className="w-1.5 h-3 block flex-shrink-0"></span>
                 <span className="font-mono text-neutral-400 text-xs w-10 flex-shrink-0">
                   {event.time || '종일'}
@@ -201,7 +215,7 @@ export default function Calendar({ events, selectedDate, setSelectedDate, onDele
                 
                 <button 
                   onClick={(e) => {
-                    e.stopPropagation();
+                    e.stopPropagation(); // 💡 중요: 삭제 버튼 누를 때 수정 모달이 같이 뜨는 것 방지
                     onDeleteEvent(event.id);
                   }}
                   className="text-neutral-300 hover:text-neutral-600 ml-auto transition-all p-1 cursor-pointer opacity-0 group-hover:opacity-100"

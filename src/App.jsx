@@ -28,6 +28,9 @@ export default function App() {
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [isModalOpen, setIsModalOpen] = useState(false)
   
+  const [isEditing, setIsEditing] = useState(false)
+  const [editingEventId, setEditingEventId] = useState(null)
+
   const [modalTitle, setModalTitle] = useState('')
   const [modalStartDate, setModalStartDate] = useState('') 
   const [modalEndDate, setModalEndDate] = useState('')     
@@ -69,7 +72,7 @@ export default function App() {
     initSessionAndFetch()
   }, [])
 
-  // 📥 백엔드 타임스탬프 로드 및 달력 분할 매핑 (연박 추적기 탑재)
+  // 📥 백엔드 데이터 동기화
   const fetchBackendData = async (uid) => {
     const { data: eventsData, error: eventsError } = await supabase
       .from('events')
@@ -106,9 +109,8 @@ export default function App() {
             user_id: e.user_id,
             date: dateStr,
             time: timeStr === '00:00' ? '종일' : timeStr,
+            rawTime: timeStr,
             duration: Math.max(0.5, (end - start) / (1000 * 60 * 60)),
-            
-            // 💡 [여기가 추가됨] 연박 일정을 달력에서 한 줄로 이어지게 만들기 위한 메타데이터 주입
             origStart: origStartStr,
             origEnd: origEndStr
           })
@@ -127,13 +129,31 @@ export default function App() {
     else setTodos(todosData || [])
   }
 
-  // AI 분석 핸들러
+  // 🧠 AI 분석 핸들러
   const handleAnalyze = async () => {
     if (!newScheduleInput.trim()) return
     setIsAnalyzing(true)
+    
     try {
-      const data = await parseScheduleWithAI(newScheduleInput)
+      const uniqueEvents = []
+      const seenIds = new Set()
+      events.forEach(e => {
+        if (!seenIds.has(e.id)) {
+          seenIds.add(e.id)
+          uniqueEvents.push(e)
+        }
+      })
+
+      const data = await parseScheduleWithAI(newScheduleInput, uniqueEvents)
       
+      if (data.status === 'update' && data.id) {
+        setIsEditing(true)
+        setEditingEventId(data.id)
+      } else {
+        setIsEditing(false)
+        setEditingEventId(null)
+      }
+
       setModalTitle(data.title || '')
       setModalStartDate(data.date || '')
       setModalTime(data.time || '')
@@ -162,10 +182,39 @@ export default function App() {
 
       setIsModalOpen(true)
     } catch (error) {
-      alert(`AI 분석 실패: ${error.message}`)
+      console.error("Gemini API 한도 초과 예외 트리거 처리:", error.message)
+      
+      const confirmManual = window.confirm(
+        "⚠️ Gemini AI의 무료 사용량을 모두 소모했습니다!\n\n잠시 후 다시 시도하시거나, 지금 바로 수동으로 내용을 채워 일정을 등록하시겠습니까?"
+      )
+      
+      if (confirmManual) {
+        setIsEditing(false)
+        setEditingEventId(null)
+        setModalTitle(newScheduleInput)
+        setModalStartDate(selectedDate)
+        setModalEndDate(selectedDate)
+        setModalTime('')
+        setModalDuration(1)
+        setModalCategory('딥 테일')
+        setIsModalOpen(true)            
+      }
     } finally {
       setIsAnalyzing(false)
     }
+  }
+
+  const handleOpenEditModal = (event) => {
+    setIsEditing(true)
+    setEditingEventId(event.id)
+    setModalTitle(event.title)
+    setModalStartDate(event.origStart)
+    setModalEndDate(event.origEnd)
+    setModalTime(event.rawTime === '00:00' ? '' : event.rawTime)
+    setModalDuration(event.duration)
+    setModalCategory(event.category)
+    setModalIsTodo(false)
+    setIsModalOpen(true)
   }
 
   // 저장 처리
@@ -196,7 +245,7 @@ export default function App() {
           endDateObj = new Date(`${modalEndDate}T${modalTime || '23:59'}:59`)
         }
 
-        const newEventForDB = {
+        const eventDataPayload = {
           title: modalTitle,
           start_time: startDateObj.toISOString(),
           end_time: endDateObj.toISOString(),
@@ -205,13 +254,23 @@ export default function App() {
           user_id: userId
         }
 
-        const { error } = await supabase.from('events').insert([newEventForDB]).select()
-        if (error) throw error 
+        if (isEditing) {
+          const { error } = await supabase
+            .from('events')
+            .update(eventDataPayload)
+            .eq('id', editingEventId)
+          if (error) throw error
+        } else {
+          const { error } = await supabase.from('events').insert([eventDataPayload])
+          if (error) throw error 
+        }
         
         await fetchBackendData(userId)
       }
       
       setIsModalOpen(false)
+      setIsEditing(false)
+      setEditingEventId(null)
       setNewScheduleInput('')
     } catch (error) {
       alert(`❌ 데이터베이스 저장 실패!\n원인: ${error.message}`)
@@ -252,7 +311,7 @@ export default function App() {
   }
 
   const handleDeleteTodo = async (id) => {
-    const { error } = await supabase.from('todos').delete().eq('id', id)
+    const { error = null } = await supabase.from('todos').delete().eq('id', id)
     if (error) alert(`할 일 삭제 실패: ${error.message}`)
     else setTodos(prev => prev.filter(t => t.id !== id))
   }
@@ -281,6 +340,7 @@ export default function App() {
             selectedDate={selectedDate}
             setSelectedDate={setSelectedDate}
             onDeleteEvent={handleDeleteEvent}
+            onEditEvent={handleOpenEditModal} 
           />
         </div>
         <div className="border border-neutral-200 p-6">
@@ -304,7 +364,11 @@ export default function App() {
 
       <AiResultModal 
         isOpen={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
+        onClose={() => {
+          setIsModalOpen(false)
+          setIsEditing(false)
+          setEditingEventId(null)
+        }}
         title={modalTitle}
         setTitle={setModalTitle}
         startDate={modalStartDate}
@@ -318,6 +382,7 @@ export default function App() {
         category={modalCategory}
         setCategory={setModalCategory}
         onSave={handleSaveEvent}
+        isEditing={isEditing} // 💡 [여기가 핵심] 모달창에 수정 상태를 정밀하게 전달합니다.
       />
     </div>
   )

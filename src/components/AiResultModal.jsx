@@ -11,11 +11,12 @@ export default function AiResultModal({
   setEndDate,     
   time, 
   setTime,
-  duration,       // 💡 당일 일정의 정밀 추적을 위해 화려하게 복귀!
+  duration,       
   setDuration,    
   category, 
   setCategory, 
-  onSave 
+  onSave,
+  isEditing // 💡 [새로 추가] 현재 수정 중인지 여부를 부모에게 받아옵니다.
 }) {
   if (!isOpen) return null
 
@@ -31,11 +32,10 @@ export default function AiResultModal({
     <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4 select-none">
       <div className="bg-white rounded-xl p-8 w-full max-w-lg shadow-[0_20px_50px_rgba(0,0,0,0.2)] border border-neutral-100 space-y-6">
         
-        {/* 헤더 타이틀 */}
-        <div className="space-y-1">
-          <p className="text-xs text-neutral-400 font-bold tracking-wider">AI 분석 결과</p>
-          <h3 className="text-xl font-extrabold text-neutral-900 tracking-tight">
-            분석된 정밀 데이터를 확인해 주세요
+        {/* 💡 [UX 혁신] 추가일 때는 '새로운 일정 등록', 수정일 때는 '일정 수정'으로 동적 스위칭 */}
+        <div className="space-y-0.5">
+          <h3 className="text-lg font-bold text-neutral-950 tracking-tight">
+            {isEditing ? '일정 수정' : '새로운 일정 등록'}
           </h3>
         </div>
 
@@ -53,7 +53,7 @@ export default function AiResultModal({
             />
           </div>
 
-          {/* 2열: 기간형 일정을 위한 날짜 연동 그리드 */}
+          {/* 2열: 시작 날짜 & 종료 날짜 그리드 */}
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1.5">
               <label className="text-xs font-bold text-neutral-500">시작 날짜</label>
@@ -76,7 +76,7 @@ export default function AiResultModal({
             </div>
           </div>
 
-          {/* 💡 3열: 당일 시간 단위 일정을 위한 정밀 시각/진행시간 그리드 */}
+          {/* 3열: 시작 시간 & 진행 시간 그리드 */}
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1.5">
               <label className="text-xs font-bold text-neutral-500">시작 시간 (비워둘 시 To-do)</label>
@@ -97,7 +97,6 @@ export default function AiResultModal({
                   max="24"
                   value={duration || 1}
                   onChange={(e) => setDuration(Number(e.target.value))}
-                  // 💡 화살표 스핀 마크를 강제 무력화하고 우측 여백 패딩을 완벽 조율하여 글자 겹침을 완전 차단
                   className="w-full border border-neutral-200 rounded-lg px-4 py-3 text-sm text-neutral-900 focus:border-neutral-900 outline-none font-bold font-mono transition-all pr-20 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                 />
                 <span className="absolute right-4 text-xs font-bold text-neutral-400 font-sans pointer-events-none">
@@ -141,7 +140,7 @@ export default function AiResultModal({
             onClick={onSave}
             className="bg-neutral-950 text-white font-bold py-3.5 rounded-lg text-sm hover:bg-neutral-900 active:scale-[0.99] transition-all cursor-pointer shadow-md"
           >
-            최종 저장
+            저장
           </button>
         </div>
 
