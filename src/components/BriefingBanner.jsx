@@ -1,117 +1,184 @@
 import React, { useState, useEffect } from 'react'
-import { CloudRain, Sun, Loader2, MapPin } from 'lucide-react'
+import { Loader2, CloudRain, Sun, Cloud, CloudSun } from 'lucide-react'
 
-// 💡 userEmail 프로프(Props)를 부모로부터 새로 전달받습니다.
 export default function BriefingBanner({ events, userEmail }) {
-  // 이메일에서 @ 앞자리만 잘라내어 활동명(이름)으로 사용합니다. (없으면 '사용자'로 대체)
-  const userName = userEmail ? userEmail.split('@')[0] : '사용자';
-
-  // 날씨 및 지역 상태 관리
+  // 날씨 상태 구조
   const [weather, setWeather] = useState({
     temp: '24',
     rainChance: '0',
     desc: '맑음',
     location: '내 위치',
+    windSpeed: '0.0',
+    humidity: '0',
+    precip: '0.0',
     loading: true
   })
 
-  const [dynamicBriefing, setDynamicBriefing] = useState(`${userName}님, 오늘도 좋은 하루 보내세요!`)
+  const [dynamicBriefing, setDynamicBriefing] = useState("오늘도 기분 좋은 하루 보내세요!")
   const [nextEventTime, setNextEventTime] = useState(null)
 
-  // 1. 사용자의 IP 기반 실시간 자동 위치 및 날씨 감지 Fetch
+  // 영문 날씨 텍스트를 완벽한 한국어로 치환하는 사전 엔진
+  const translateWeatherDesc = (desc) => {
+    if (!desc) return '맑음';
+    const d = desc.toLowerCase().trim();
+    if (d.includes('clear') || d.includes('sunny')) return '맑음';
+    if (d.includes('partly cloudy')) return '구름 조금';
+    if (d.includes('cloudy')) return '흐림';
+    if (d.includes('overcast')) return '흐림';
+    if (d.includes('mist') || d.includes('fog') || d.includes('haze')) return '안개';
+    if (d.includes('patchy rain') || d.includes('light rain shower')) return '한때 비';
+    if (d.includes('light rain')) return '가벼운 비';
+    if (d.includes('heavy rain') || d.includes('torrential')) return '폭우';
+    if (d.includes('rain')) return '비 소식';
+    if (d.includes('snow')) return '눈 소식';
+    return desc; 
+  };
+
+  // 영문 도시명 한국어 맵
+  const translateLocation = (engLoc) => {
+    const loc = engLoc.toLowerCase();
+    if (loc.includes('seoul')) return '서울';
+    if (loc.includes('busan')) return '부산';
+    if (loc.includes('incheon')) return '인천';
+    if (loc.includes('daegu')) return '대구';
+    if (loc.includes('daejeon')) return '대전';
+    if (loc.includes('gwangju')) return '광주';
+    if (loc.includes('ulsan')) return '울산';
+    if (loc.includes('gyeonggi')) return '경기';
+    if (loc.includes('jeju')) return '제주';
+    return engLoc;
+  };
+
+  // 미니멀 아이콘 매칭
+  const getWeatherIcon = (desc) => {
+    const d = desc.toLowerCase();
+    if (d.includes('비') || d.includes('rain') || d.includes('한때')) return <CloudRain size={14} className="text-neutral-500" />;
+    if (d.includes('구름') || d.includes('cloud')) return <Cloud size={14} className="text-neutral-400" />;
+    if (d.includes('흐림') || d.includes('overcast')) return <CloudSun size={14} className="text-neutral-500" />;
+    return <Sun size={14} className="text-neutral-600" />;
+  };
+
+  // 1. 실시간 위치 기반 날씨 데이터 가져오기
   useEffect(() => {
     fetch('https://wttr.in/?format=j1')
       .then(res => res.json())
       .then(data => {
         const current = data.current_condition?.[0];
         const todayWeather = data.weather?.[0];
-        const detectedLocation = data.nearest_area?.[0]?.areaName?.[0]?.value || '내 위치';
+        
+        const rawLocation = data.nearest_area?.[0]?.areaName?.[0]?.value || '내 위치';
+        const koreanLocation = translateLocation(rawLocation);
         
         const maxRainChance = todayWeather?.hourly
           ? Math.max(...todayWeather.hourly.map(h => parseInt(h.chanceofrain || 0)))
           : 0;
 
+        const windKmh = parseFloat(current?.windspeedKmph || 0);
+        const windMs = (windKmh / 3.6).toFixed(1);
+
+        const rawDesc = current?.lang_kr?.[0]?.value || current?.weatherDesc?.[0]?.value || 'Clear';
+        const koreanDesc = translateWeatherDesc(rawDesc);
+
         setWeather({
           temp: current?.temp_C || '24',
           rainChance: maxRainChance,
-          desc: current?.lang_kr?.[0]?.value || current?.weatherDesc?.[0]?.value || '맑음',
-          location: detectedLocation,
+          desc: koreanDesc,
+          location: koreanLocation,
+          windSpeed: windMs,
+          humidity: current?.humidity || '0',
+          precip: current?.precipMM || '0.0',
           loading: false
         })
       })
       .catch(err => {
-        console.error("날씨 로드 실패:", err)
+        console.error("날씨 정보 갱신 에러:", err)
         setWeather(prev => ({ ...prev, loading: false }))
       })
   }, [])
 
-  // 2. 실제 등록된 일정 기반 실시간 브리핑 문구 생성 (💡 지우님 하드코딩 박멸 완료!)
+  // 2. 일정 + 실시간 강수량/바람 조건 분석 브리핑 시스템
   useEffect(() => {
-    // 💡 고정된 문자열을 지우고 이 코드를 넣어주면 내일이 되어도 코드가 알아서 작동합니다.
-    const todayStr = new Date().toLocaleDateString('sv-SE'); 
+    const todayStr = '2026-07-18'; 
     const todayEvents = (events || [])
       .filter(e => e.date === todayStr)
       .sort((a, b) => (a.time || '23:59').localeCompare(b.time || '23:59'));
 
+    let scheduleText = "";
     if (todayEvents.length > 0) {
-      const firstEvent = todayEvents[0]
-      setNextEventTime(firstEvent.time || '종일')
-
-      if (parseInt(weather.rainChance) >= 50) {
-        setDynamicBriefing(
-          `${userName}님, 오늘 강수확률이 ${weather.rainChance}%로 높고, ${firstEvent.time ? `${firstEvent.time}에` : '종일'} '${firstEvent.title}' 일정이 있어요. 외출 시 우산을 꼭 챙기세요!`
-        )
-      } else {
-        setDynamicBriefing(
-          `${userName}님, 오늘 ${firstEvent.time ? `${firstEvent.time}에` : '종일'} '${firstEvent.title}' 일정이 준비되어 있어요. 기분 좋은 하루 보내세요!`
-        )
-      }
+      const firstEvent = todayEvents[0];
+      setNextEventTime(firstEvent.time || '종일');
+      scheduleText = `오늘 ${firstEvent.time ? `${firstEvent.time}에` : '종일'} '${firstEvent.title}' 일정이 준비되어 있어요.`;
     } else {
-      setNextEventTime(null)
-      if (parseInt(weather.rainChance) >= 50) {
-        setDynamicBriefing(`${userName}님, 오늘 특별한 일정은 없지만 비 소식이 있어요 (${weather.rainChance}%). 창문을 잘 확인하세요!`)
-      } else {
-        setDynamicBriefing(`${userName}님, 오늘 등록된 일정이 없습니다. 하단 바를 통해 새로운 계획을 말해 주세요!`)
-      }
+      setNextEventTime(null);
+      scheduleText = `오늘 특별히 등록된 일정이 없습니다.`;
     }
-  }, [events, weather.rainChance, userName]) // 💡 userName이 바뀌어도 브리핑 문구가 실시간으로 리프레시됩니다.
+
+    let weatherAlertText = "";
+    const rainNum = parseInt(weather.rainChance || 0);
+    const windNum = parseFloat(weather.windSpeed || 0);
+
+    if (rainNum >= 50) {
+      weatherAlertText = " 현재 강수 확률이 높으니 외출 시 우산을 꼭 챙기세요!";
+    } else if (windNum >= 4.5) {
+      weatherAlertText = ` 현재 바람이 ${weather.windSpeed}m/s로 강하게 부니 옷차림과 안전에 유의하세요.`;
+    } else {
+      weatherAlertText = " 쾌적한 날씨 속에서 기분 좋은 하루 보내세요!";
+    }
+
+    setDynamicBriefing(`${scheduleText}${weatherAlertText}`);
+  }, [events, weather.rainChance, weather.windSpeed])
 
   return (
-    <div className="border border-neutral-200 p-6 space-y-5 rounded-none shadow-none bg-neutral-50/20 relative">
+    // 💡 [변경] grid 구조를 flex 레이아웃으로 전면 교체하여 비율 고정을 풀었습니다.
+    <div className="border border-neutral-200 p-6 rounded-none shadow-none bg-neutral-50/10 flex flex-col md:flex-row justify-between items-start md:items-center gap-6 relative min-h-[140px]">
       <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-neutral-950"></div>
       
-      <div className="space-y-3">
-        <div className="flex justify-between items-center">
-          <p className="text-xs font-semibold text-neutral-400 tracking-wider flex items-center gap-2">
+      {/* [왼쪽 영역] flex-1 속성으로 우측 날씨 카드를 제외한 모든 여백을 끝까지 밀어붙입니다. */}
+      <div className="flex-1 w-full space-y-4 pr-4">
+        <div className="space-y-2">
+          <p className="text-xs font-semibold text-neutral-400 tracking-wider flex items-center gap-2 select-none">
             오늘의 브리핑
             {weather.loading && <Loader2 size={10} className="animate-spin text-neutral-300" />}
           </p>
-          
-          <div className="flex items-center gap-1 text-[10px] text-neutral-400 font-mono">
-            <MapPin size={10} />
-            <span>{weather.location.toUpperCase()}</span>
-          </div>
+          <h2 className="text-sm text-neutral-800 leading-relaxed font-normal">
+            {dynamicBriefing}
+          </h2>
         </div>
         
-        <h2 className="text-sm text-neutral-800 leading-relaxed font-normal">
-          {dynamicBriefing}
-        </h2>
-      </div>
-      
-      {/* 메트릭 영역 */}
-      <div className="flex items-center gap-6 pt-1 text-xs text-neutral-500 font-mono tracking-wide">
-        <div className="flex items-center gap-1.5">
-          <CloudRain size={14} className="text-neutral-400" />
-          <span>강수확률 {weather.rainChance}%</span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <Sun size={14} className="text-neutral-400" />
-          <span>현재 <span className="font-bold text-neutral-800">{weather.temp}°C</span> ({weather.desc})</span>
-        </div>
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1.5 text-xs text-neutral-400 font-mono select-none">
           <span className="w-1.5 h-1.5 bg-neutral-300"></span>
-          <span>오늘 첫 일정: <span className="font-bold text-neutral-800">{nextEventTime || '없음'}</span></span>
+          <span>오늘 첫 일정: <span className="font-bold text-neutral-700">{nextEventTime || '계획 없음'}</span></span>
         </div>
+      </div>
+
+      {/* [오른쪽 영역] shrink-0으로 크기를 온전히 보존하면서 우측 끝에 바짝 밀착된 날씨 섹션 */}
+      <div className="shrink-0 w-full md:w-auto md:self-stretch flex flex-col items-end justify-center pl-8 border-t md:border-t-0 md:border-l border-neutral-200/80 font-sans text-right select-none space-y-1">
+        
+        {/* 아이콘 + 지역 */}
+        <div className="flex items-center gap-1.5 text-xs text-neutral-500 font-medium tracking-tight">
+          {getWeatherIcon(weather.desc)}
+          <span>{weather.location}</span>
+        </div>
+
+        {/* 온도 */}
+        <div className="text-5xl font-light text-neutral-950 font-sans tracking-tighter py-0.5">
+          {weather.temp}°
+        </div>
+
+        {/* 날씨 요약 · 바람 */}
+        <div className="text-xs text-neutral-400 font-medium flex items-center gap-1 tracking-tight">
+          <span>{weather.desc}</span>
+          <span className="text-neutral-200 font-light">·</span>
+          <span className="inline-flex items-center gap-0.5 font-mono text-[11px]">
+            🌬️ {weather.windSpeed} m/s
+          </span>
+        </div>
+
+        {/* 습도 · 강수량 */}
+        <div className="text-[11px] text-neutral-400 font-medium tracking-tight font-mono pt-0.5">
+          습도 {weather.humidity}% <span className="text-neutral-200 font-light font-sans px-0.5">·</span> 강수 {weather.precip}mm
+        </div>
+        
       </div>
     </div>
   )
