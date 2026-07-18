@@ -1,35 +1,138 @@
 import React from 'react'
 
-export default function AiResultModal({ showAiModal, setShowAiModal, parsedResult, setParsedResult, onSaveResult, sophisticatedColors }) {
-  if (!showAiModal) return null;
+export default function AiResultModal({ 
+  isOpen, 
+  onClose, 
+  title, 
+  setTitle, 
+  date, 
+  setDate, 
+  time, 
+  setTime,
+  duration,       
+  setDuration,    
+  category, 
+  setCategory, 
+  onSave 
+}) {
+  if (!isOpen) return null
+
+  // 카테고리 컬러칩 리스트 정의
+  const colors = [
+    { name: '민트', class: 'bg-[#76cca6]' },
+    { name: '코랄', class: 'bg-[#e77471]' },
+    { name: '그린', class: 'bg-[#b6cdac]' },
+    { name: '소프트 라벤더', class: 'bg-[#d1c4e9]' },
+    { name: '베이지', class: 'bg-[#e1d3c7]' }
+  ]
 
   return (
-    <div className="fixed inset-0 bg-neutral-900/40 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-      <div className="w-full max-w-md bg-white border border-neutral-200 p-6 space-y-6 rounded-none shadow-none">
-        <div className="space-y-1"><span className="text-xs font-medium text-neutral-400 block">AI 분석 결과</span><h4 className="text-sm font-bold text-neutral-950">분석된 정밀 데이터를 확인해 주세요</h4></div>
+    <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4 select-none">
+      <div className="bg-white rounded-xl p-8 w-full max-w-lg shadow-[0_20px_50px_rgba(0,0,0,0.2)] border border-neutral-100 space-y-6">
         
+        {/* 헤더 타이틀 */}
+        <div className="space-y-1">
+          <p className="text-xs text-neutral-400 font-bold tracking-wider">AI 분석 결과</p>
+          <h3 className="text-xl font-extrabold text-neutral-900 tracking-tight">
+            분석된 정밀 데이터를 확인해 주세요
+          </h3>
+        </div>
+
+        {/* 폼 본문 영역 */}
         <div className="space-y-4">
-          <div className="space-y-1.5"><label className="block text-xs font-medium text-neutral-600">제목</label><input type="text" value={parsedResult.title} onChange={(e) => setParsedResult(prev => ({ ...prev, title: e.target.value }))} className="w-full border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-950 outline-none focus:border-neutral-900 rounded-sm" /></div>
           
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-1.5"><label className="block text-xs font-medium text-neutral-600">날짜</label><input type="text" value={parsedResult.date} onChange={(e) => setParsedResult(prev => ({ ...prev, date: e.target.value }))} className="w-full border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-950 outline-none focus:border-neutral-900 rounded-sm" /></div>
-            <div className="space-y-1.5"><label className="block text-xs font-medium text-neutral-600">시간 (비워둘 시 To-do로 변경)</label><input type="text" value={parsedResult.time || ''} onChange={(e) => setParsedResult(prev => ({ ...prev, time: e.target.value, isTodo: !e.target.value }))} placeholder="예: 15:00" className="w-full border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-950 outline-none focus:border-neutral-900 rounded-sm" /></div>
+          {/* 1열: 제목 입력 필드 */}
+          <div className="space-y-1.5">
+            <label className="text-xs font-bold text-neutral-500">제목</label>
+            <input 
+              type="text"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              className="w-full border border-neutral-200 rounded-lg px-4 py-3 text-sm text-neutral-900 focus:border-neutral-900 outline-none font-medium transition-all"
+            />
           </div>
-          
+
+          {/* 2열: 날짜 필드 (가로 너비를 여유 있게 단독 배치) */}
+          <div className="space-y-1.5">
+            <label className="text-xs font-bold text-neutral-500">날짜</label>
+            <input 
+              type="date"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+              className="w-full border border-neutral-200 rounded-lg px-4 py-3 text-sm text-neutral-900 focus:border-neutral-900 outline-none font-medium font-mono transition-all"
+            />
+          </div>
+
+          {/* 💡 3열 [구조 개선]: 시작 시간과 진행 시간을 50:50 세트로 묶어 밸런스 최적화 */}
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-neutral-500">시작 시간 (비워둘 시 To-do)</label>
+              <input 
+                type="time"
+                value={time}
+                onChange={(e) => setTime(e.target.value)}
+                className="w-full border border-neutral-200 rounded-lg px-4 py-3 text-sm text-neutral-900 focus:border-neutral-900 outline-none font-medium font-mono transition-all"
+              />
+            </div>
+            
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-neutral-500">진행 시간</label>
+              <div className="relative flex items-center">
+                {/* 💡 [우측 화살표 완전 제거 스크립트 추가] */}
+                <input 
+                  type="number"
+                  step="0.5"
+                  min="0.5"
+                  max="24"
+                  value={duration || 1}
+                  onChange={(e) => setDuration(Number(e.target.value))}
+                  className="w-full border border-neutral-200 rounded-lg px-4 py-3 text-sm text-neutral-900 focus:border-neutral-900 outline-none font-bold font-mono transition-all pr-20 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                />
+                <span className="absolute right-4 text-xs font-bold text-neutral-400 font-sans pointer-events-none">
+                  시간 동안
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* 4열: 카테고리 컬러칩 영역 */}
           <div className="space-y-2 pt-1">
-            <label className="block text-xs font-medium text-neutral-600 mb-2">카테고리: <span className="font-bold text-neutral-800">{parsedResult.category}</span></label>
-            <div className="flex gap-2">
-              {sophisticatedColors.map(color => (
-                <button key={color.hex} type="button" onClick={() => setParsedResult(prev => ({ ...prev, category: color.name, color: color.hex }))} style={{ backgroundColor: color.hex }} className={`w-8 h-8 rounded-full border cursor-pointer transition-all hover:scale-110 active:scale-95 ${parsedResult.category === color.name ? 'ring-2 ring-neutral-950 ring-offset-2 scale-105' : 'border-neutral-100'}`} title={color.name} />
+            <label className="text-xs font-bold text-neutral-500">
+              카테고리: <span className="text-neutral-800 font-extrabold">{category}</span>
+            </label>
+            <div className="flex gap-3 items-center">
+              {colors.map((c) => (
+                <button
+                  key={c.name}
+                  onClick={() => setCategory(c.name)}
+                  className={`w-8 h-8 rounded-full cursor-pointer transition-all ${c.class} ${
+                    category === c.name 
+                      ? 'ring-2 ring-offset-2 ring-neutral-950 scale-110 shadow-sm' 
+                      : 'hover:scale-105 opacity-80 hover:opacity-100'
+                  }`}
+                />
               ))}
             </div>
           </div>
+
         </div>
 
+        {/* 하단 취소 / 저장 더블 액션 버튼 바 */}
         <div className="grid grid-cols-2 gap-3 pt-2">
-          <button onClick={() => setShowAiModal(false)} className="border border-neutral-300 py-2 text-sm font-medium text-neutral-900 hover:bg-neutral-50 rounded-sm">취소</button>
-          <button onClick={onSaveResult} className="bg-neutral-950 py-2 text-sm font-medium text-white hover:opacity-90 rounded-sm">최종 저장</button>
+          <button
+            onClick={onClose}
+            className="border border-neutral-200 text-neutral-800 font-bold py-3.5 rounded-lg text-sm hover:bg-neutral-50 active:scale-[0.99] transition-all cursor-pointer"
+          >
+            취소
+          </button>
+          <button
+            onClick={onSave}
+            className="bg-neutral-950 text-white font-bold py-3.5 rounded-lg text-sm hover:bg-neutral-900 active:scale-[0.99] transition-all cursor-pointer shadow-md"
+          >
+            최종 저장
+          </button>
         </div>
+
       </div>
     </div>
   )

@@ -1,253 +1,309 @@
 import React, { useState, useEffect } from 'react'
-import { supabase } from './supabaseClient'
-import Auth from './components/Auth'
-import { parseScheduleWithAI } from './utils/gemini'
-
-// 💡 쪼갠 컴포넌트들 깔끔하게 임포트 완료
 import BriefingBanner from './components/BriefingBanner'
-import Calendar from './components/Calendar'
-import TodoList from './components/TodoList'
 import AiFloatingInput from './components/AiFloatingInput'
 import AiResultModal from './components/AiResultModal'
+import Calendar from './components/Calendar'
+import TodoList from './components/TodoList'
+import Auth from './components/Auth' 
+import { parseScheduleWithAI } from './utils/gemini'
+import { supabase } from './supabaseClient'
+
+const categoryColors = {
+  '딥 테일': '#7DCFB6',
+  '뮤트 코랄': '#E87474',
+  '뮤트 세이지': '#BCCBA3',
+  '소프트 라벤더': '#D1C4E9',
+  '뮤트 베이지': '#DBCBBD'
+}
 
 export default function App() {
-  const [session, setSession] = useState(null)
-  const [loading, setLoading] = useState(true)
-  const [dbLoading, setDbLoading] = useState(false)
-  
-  // 실시간 DB 데이터 상태
   const [events, setEvents] = useState([])
   const [todos, setTodos] = useState([])
+  const [selectedDate, setSelectedDate] = useState(new Date().toLocaleDateString('sv-SE'))
+  const [userEmail, setUserEmail] = useState('')
+  const [userId, setUserId] = useState(null)
+  const [isSessionLoading, setIsSessionLoading] = useState(true) 
 
-  // sv-SE 포맷을 쓰면 'YYYY-MM-DD' 형태로 오늘 날짜가 자동 추출됩니다!
-const [selectedDate, setSelectedDate] = useState(new Date().toLocaleDateString('sv-SE'))
-
-  // 입력 및 AI 모달 상태
   const [newScheduleInput, setNewScheduleInput] = useState('')
   const [isAnalyzing, setIsAnalyzing] = useState(false)
-  const [showAiModal, setShowAiModal] = useState(false)
+  const [isModalOpen, setIsModalOpen] = useState(false)
   
-  const [parsedResult, setParsedResult] = useState({ title: '', date: '', time: '', isTodo: false, category: '', color: '' })
-
-  const sophisticatedColors = [
-    { name: '딥 테일', hex: '#7DCFB6' },
-    { name: '뮤트 코랄', hex: '#E87474' },
-    { name: '뮤트 세이지', hex: '#BCCBA3' },
-    { name: '소프트 라벤더', hex: '#D1C4E9' },
-    { name: '뮤트 베이지', hex: '#DBCBBD' }
-  ];
-
-  // Supabase 실시간 데이터 불러오기 (R)
-  const fetchSchedules = async (userId) => {
-    if (!userId) return
-    setDbLoading(true)
-    try {
-      const { data, error } = await supabase
-        .from('schedules')
-        .select('*')
-        .eq('user_id', userId)
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-      const safeData = data || [];
-      setEvents(safeData.filter(item => !item.is_todo));
-      setTodos(safeData.filter(item => item.is_todo));
-    } catch (err) {
-      console.error(err.message);
-    } finally {
-      setDbLoading(false);
-    }
-  }
+  const [modalTitle, setModalTitle] = useState('')
+  const [modalDate, setModalDate] = useState('')
+  const [modalTime, setModalTime] = useState('')
+  const [modalDuration, setModalDuration] = useState(1)
+  const [modalCategory, setModalCategory] = useState('딥 테일')
+  const [modalIsTodo, setModalIsTodo] = useState(false)
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session)
-      if (session?.user?.id) fetchSchedules(session.user.id);
-      setLoading(false)
-    })
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session)
-      if (session?.user?.id) {
-        fetchSchedules(session.user.id);
-      } else {
-        setEvents([]);
-        setTodos([]);
+    const initSessionAndFetch = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession()
+        if (session?.user) {
+          setUserId(session.user.id)
+          setUserEmail(session.user.email)
+          await fetchBackendData(session.user.id)
+        }
+      } catch (err) {
+        console.error("세션 초기화 에러:", err)
+      } finally {
+        setIsSessionLoading(false)
       }
-    })
-    return () => subscription.unsubscribe()
+
+      supabase.auth.onAuthStateChange((_event, session) => {
+        if (session?.user) {
+          setUserId(session.user.id)
+          setUserEmail(session.user.email)
+          fetchBackendData(session.user.id)
+        } else {
+          setUserId(null)
+          setUserEmail('')
+          setEvents([])
+          setTodos([])
+        }
+        setIsSessionLoading(false)
+      })
+    }
+
+    initSessionAndFetch()
   }, [])
 
-  // AI 분석 및 최종 저장 로직 (C)
+  // 📥 [데이터 변환 로드] DB의 start_time, end_time을 프론트엔드가 이해하는 date, time, duration으로 쪼갭니다.
+  const fetchBackendData = async (uid) => {
+    const { data: eventsData, error: eventsError } = await supabase
+      .from('events')
+      .select('*')
+      .eq('user_id', uid)
+      
+    if (eventsError) {
+      console.error("일정 불러오기 실패:", eventsError.message)
+    } else {
+      // 💡 데이터 포맷 가공 변환기 실행
+      const parsedEvents = (eventsData || []).map(e => {
+        if (!e.start_time) return { ...e, date: '', time: '', duration: 1 }
+        
+        const startDateObj = new Date(e.start_time)
+        const endDateObj = e.end_time ? new Date(e.end_time) : new Date(startDateObj.getTime() + 60 * 60 * 1000)
+        
+        // 날짜 파싱 (YYYY-MM-DD)
+        const yyyy = startDateObj.getFullYear()
+        const mm = String(startDateObj.getMonth() + 1).padStart(2, '0')
+        const dd = String(startDateObj.getDate()).padStart(2, '0')
+        const date = `${yyyy}-${mm}-${dd}`
+        
+        // 시간 파싱 (HH:MM)
+        const time = String(startDateObj.getHours()).padStart(2, '0') + ':' + String(startDateObj.getMinutes()).padStart(2, '0')
+        
+        // 진행 시간 계산 (시간 단위)
+        const duration = Math.max(0.5, (endDateObj - startDateObj) / (1000 * 60 * 60))
+        
+        return {
+          id: e.id,
+          title: e.title,
+          category: e.category,
+          color: e.color,
+          user_id: e.user_id,
+          date,
+          time,
+          duration
+        }
+      })
+      setEvents(parsedEvents)
+    }
+
+    const { data: todosData, error: todosError } = await supabase
+      .from('todos')
+      .select('*')
+      .eq('user_id', uid)
+    if (todosError) console.error("할 일 불러오기 실패:", todosError.message)
+    else setTodos(todosData || [])
+  }
+
+  // AI 분석 핸들러
   const handleAnalyze = async () => {
-    if (!newScheduleInput.trim()) return;
-    setIsAnalyzing(true);
+    if (!newScheduleInput.trim()) return
+    setIsAnalyzing(true)
     try {
-      const aiResult = await parseScheduleWithAI(newScheduleInput);
-      setParsedResult({
-        title: aiResult.title || '새로운 일정',
-        date: aiResult.date || '2026-07-17',
-        time: aiResult.time || '',
-        isTodo: aiResult.isTodo || false,
-        category: aiResult.category || '딥 테일',
-        color: aiResult.color || '#7DCFB6'
-      });
-      setShowAiModal(true);
-      setNewScheduleInput('');
+      const data = await parseScheduleWithAI(newScheduleInput)
+      setModalTitle(data.title || '')
+      setModalDate(data.date || '')
+      setModalTime(data.time || '')
+      setModalDuration(data.duration || 1)
+      setModalCategory(data.category || '딥 테일')
+      setModalIsTodo(data.isTodo || false)
+      setIsModalOpen(true)
     } catch (error) {
-      alert('AI 분석 실패');
+      alert(`AI 분석 실패: ${error.message}`)
     } finally {
-      setIsAnalyzing(false);
+      setIsAnalyzing(false)
     }
   }
 
-  const handleSaveResult = async () => {
-    if (!session?.user?.id) return;
-    try {
-      const { data, error } = await supabase
-        .from('schedules')
-        .insert([{
-          user_id: session.user.id,
-          title: parsedResult.title,
-          date: parsedResult.date,
-          time: parsedResult.time || null,
-          is_todo: parsedResult.isTodo,
-          category: parsedResult.category,
-          color: parsedResult.color,
-          completed: false
-        }])
-        .select();
+  // 📤 [데이터 변환 저장] 저장할 때는 다시 start_time과 end_time 타임스탬프로 합쳐서 날립니다.
+  const handleSaveEvent = async () => {
+    const color = categoryColors[modalCategory] || '#DBCBBD'
 
-      if (error) throw error;
-      
-      const savedItem = data?.[0];
-      if (savedItem) {
-        if (savedItem.is_todo) {
-          setTodos(prev => [savedItem, ...(prev || [])]);
-        } else {
-          setEvents(prev => [...(prev || []), savedItem]);
-          setSelectedDate(savedItem.date);
+    if (!userId) {
+      alert("로그인 정보가 유실되었습니다.")
+      return
+    }
+
+    try {
+      if (modalIsTodo) {
+        const newTodo = {
+          title: modalTitle,
+          date: modalDate,
+          completed: false,
+          color,
+          user_id: userId
+        }
+        
+        const { data, error } = await supabase.from('todos').insert([newTodo]).select()
+        if (error) throw error 
+        if (data && data.length > 0) setTodos((prev) => [...prev, data[0]])
+      } else {
+        // 💡 프론트엔드의 date + time 문자열을 조합해 Date 객체 생성
+        const startIsoString = `${modalDate}T${modalTime || '00:00'}:00`
+        const startDateObj = new Date(startIsoString)
+        
+        // 시작 시간에 duration(시간 단위)을 더해 종료 시간 객체 생성
+        const endDateObj = new Date(startDateObj.getTime() + Number(modalDuration) * 60 * 60 * 1000)
+
+        // Supabase 테이블 양식에 완벽 정렬 매칭
+        const newEventForDB = {
+          title: modalTitle,
+          start_time: startDateObj.toISOString(),
+          end_time: endDateObj.toISOString(),
+          category: modalCategory,
+          color,
+          user_id: userId
+        }
+
+        const { data, error } = await supabase.from('events').insert([newEventForDB]).select()
+        if (error) throw error 
+        
+        if (data && data.length > 0) {
+          // 로컬 상태에는 캘린더가 이해할 수 있는 규격으로 복원해서 업로드
+          const newEventForState = {
+            id: data[0].id,
+            title: modalTitle,
+            date: modalDate,
+            time: modalTime || null,
+            duration: Number(modalDuration),
+            category: modalCategory,
+            color
+          }
+          setEvents((prev) => [...prev, newEventForState])
         }
       }
-      setShowAiModal(false);
-    } catch (error) {
-      alert(error.message);
-    }
-  }
-
-  // To-do 수동 추가 (C)
-  const handleAddTodoManual = async (e) => {
-    e.preventDefault();
-    if (!session?.user?.id) return;
-    const inputVal = e.target.todoInput.value;
-    if(!inputVal.trim()) return;
-    try {
-      const { data, error } = await supabase.from('schedules').insert([{ user_id: session.user.id, title: inputVal, is_todo: true, completed: false, date: '2026-07-17', category: '', color: '' }]).select();
-      if (error) throw error;
-      if (data?.[0]) setTodos(prev => [data[0], ...(prev || [])]);
-      e.target.reset();
-    } catch (error) { alert(error.message); }
-  }
-
-  // To-do 완료 여부 체크박스 수정 (U)
-  const handleToggleTodo = async (todoId, currentCompleted) => {
-    try {
-      const { error } = await supabase.from('schedules').update({ completed: !currentCompleted }).eq('id', todoId);
-      if (error) throw error;
-      setTodos(prev => (prev || []).map(t => t.id === todoId ? { ...t, completed: !currentCompleted } : t));
-    } catch (error) { alert(error.message); }
-  }
-
-  // To-do 삭제 (D)
-  const handleDeleteTodo = async (todoId) => {
-    try {
-      const { error } = await supabase.from('schedules').delete().eq('id', todoId);
-      if (error) throw error;
-      setTodos(prev => (prev || []).filter(t => t.id !== todoId));
-    } catch (error) { alert(error.message); }
-  }
-
-  // 💡 [4번 핵심 기능 구현!] 달력의 일정 삭제 처리 함수 (D)
-  const handleDeleteEvent = async (eventId) => {
-    try {
-      const { error } = await supabase
-        .from('schedules')
-        .delete()
-        .eq('id', eventId);
-
-      if (error) throw error;
       
-      // 화면 상태 동기화
-      setEvents(prev => (prev || []).filter(e => e.id !== eventId));
+      setIsModalOpen(false)
+      setNewScheduleInput('')
     } catch (error) {
-      alert('일정 삭제에 실패했습니다: ' + error.message);
+      console.error("Supabase 저장 실패:", error)
+      alert(`❌ 데이터베이스 저장 실패!\n원인: ${error.message}`)
     }
   }
 
-  if (loading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-white text-neutral-400 font-mono text-xs tracking-widest">
-        LOADING...
-      </div>
-    )
+  // 일정 삭제
+  const handleDeleteEvent = async (id) => {
+    const { error } = await supabase.from('events').delete().eq('id', id)
+    if (error) alert(`삭제 실패: ${error.message}`)
+    else setEvents(prev => prev.filter(e => e.id !== id))
   }
 
-  if (!session) {
+  // 수동 할 일 추가
+  const handleAddTodoManual = async (e) => {
+    e.preventDefault()
+    const input = e.target.elements.todoInput.value
+    if (!input.trim()) return
+    
+    const newTodo = {
+      title: input,
+      date: selectedDate,
+      completed: false,
+      color: '#DBCBBD',
+      user_id: userId
+    }
+
+    const { data, error } = await supabase.from('todos').insert([newTodo]).select()
+    if (error) alert(`할 일 추가 실패: ${error.message}`)
+    else if (data) setTodos(prev => [...prev, data[0]])
+    e.target.reset()
+  }
+
+  const handleToggleTodo = async (id, completed) => {
+    const { error } = await supabase.from('todos').update({ completed: !completed }).eq('id', id)
+    if (error) alert(`상태 변경 실패: ${error.message}`)
+    else setTodos(prev => prev.map(t => t.id === id ? { ...t, completed: !completed } : t))
+  }
+
+  const handleDeleteTodo = async (id) => {
+    const { error } = await supabase.from('todos').delete().eq('id', id)
+    if (error) alert(`할 일 삭제 실패: ${error.message}`)
+    else setTodos(prev => prev.filter(t => t.id !== id))
+  }
+
+  const handleSignOut = async () => {
+    await supabase.auth.signOut()
+    alert("안전하게 로그아웃 되었습니다.")
+  }
+
+  if (isSessionLoading) {
+    return <div className="min-h-screen bg-white flex items-center justify-center font-mono text-xs text-neutral-400 animate-pulse">CONNECTING TO BACKEND...</div>
+  }
+
+  if (!userId) {
     return <Auth />
   }
 
   return (
-    <div className="min-h-screen bg-white text-neutral-900 font-sans antialiased px-8 pt-6 pb-32 max-w-7xl mx-auto space-y-8 relative">
-      
-      {/* 1. 오늘의 비서 브리핑 배너 */}
-      <BriefingBanner events={events} userEmail={session?.user?.email} />
+    <div className="min-h-screen bg-white text-neutral-900 p-6 space-y-6 max-w-7xl mx-auto pb-32">
+      <BriefingBanner events={events} />
 
-      {dbLoading && <div className="text-left text-[10px] font-mono text-neutral-400 animate-pulse tracking-widest">SYNCING DATABASE...</div>}
-
-      {/* 2. 메인 그리드 레이아웃 */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-12 pt-4">
-        
-        {/* 달력 및 하단 상세보기 섹션 */}
-        <div className="lg:col-span-2">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-2 border border-neutral-200 p-6">
           <Calendar 
             events={events} 
-            selectedDate={selectedDate} 
-            setSelectedDate={setSelectedDate} 
-            onDeleteEvent={handleDeleteEvent} // 💡 4번 삭제 핸들러 전달
+            selectedDate={selectedDate}
+            setSelectedDate={setSelectedDate}
+            onDeleteEvent={handleDeleteEvent}
           />
         </div>
-
-        {/* 우측 할 일 관리 섹션 */}
-        <div>
+        <div className="border border-neutral-200 p-6">
           <TodoList 
-            todos={todos} 
-            onAddTodoManual={handleAddTodoManual} 
-            onToggleTodo={handleToggleTodo} 
-            onDeleteTodo={handleDeleteTodo} 
-            userEmail={session?.user?.email}
-            onSignOut={() => supabase.auth.signOut()}
+            todos={todos}
+            onAddTodoManual={handleAddTodoManual}
+            onToggleTodo={handleToggleTodo}
+            onDeleteTodo={handleDeleteTodo}
+            userEmail={userEmail}
+            onSignOut={handleSignOut}
           />
         </div>
       </div>
 
-      {/* 3. 하단 블랙 플로팅 AI 바 */}
       <AiFloatingInput 
-        newScheduleInput={newScheduleInput} 
-        setNewScheduleInput={setNewScheduleInput} 
-        isAnalyzing={isAnalyzing} 
-        onAnalyze={handleAnalyze} 
+        newScheduleInput={newScheduleInput}
+        setNewScheduleInput={setNewScheduleInput}
+        isAnalyzing={isAnalyzing}
+        onAnalyze={handleAnalyze}
       />
 
-      {/* 4. AI 파싱 결과 수정 모달 */}
       <AiResultModal 
-        showAiModal={showAiModal} 
-        setShowAiModal={setShowAiModal} 
-        parsedResult={parsedResult} 
-        setParsedResult={setParsedResult} 
-        onSaveResult={handleSaveResult} 
-        sophisticatedColors={sophisticatedColors}
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        title={modalTitle}
+        setTitle={setModalTitle}
+        date={modalDate}
+        setDate={setModalDate}
+        time={modalTime}
+        setTime={setModalTime}
+        duration={modalDuration}
+        setDuration={setModalDuration}
+        category={modalCategory}
+        setCategory={setModalCategory}
+        onSave={handleSaveEvent}
       />
-
     </div>
   )
 }
