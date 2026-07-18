@@ -39,6 +39,7 @@ export default function App() {
   const [modalCategory, setModalCategory] = useState('딥 테일')
   const [modalIsTodo, setModalIsTodo] = useState(false)
 
+  // 🔌 1. 앱 시작 시 인증 세션 초기화 및 감시
   useEffect(() => {
     const initSessionAndFetch = async () => {
       try {
@@ -72,7 +73,44 @@ export default function App() {
     initSessionAndFetch()
   }, [])
 
-  // 📥 백엔드 데이터 동기화
+  // 💡 2. [대형 추가] Supabase Realtime 실시간 데이터베이스 브로드캐스팅 리스너 심기
+  useEffect(() => {
+    if (!userId) return
+
+    // 📡 events 테이블 실시간 채널 구독 (내 user_id 데이터만 필터링)
+    const eventsChannel = supabase
+      .channel('public:events_realtime')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'events', filter: `user_id=eq.${userId}` },
+        (payload) => {
+          console.log('⚡ [Realtime] 일정 변동 감지됨:', payload)
+          fetchBackendData(userId) // 데이터 변경 시 자동으로 전수 리프레시!
+        }
+      )
+      .subscribe()
+
+    // 📡 todos 테이블 실시간 채널 구독 (내 user_id 데이터만 필터링)
+    const todosChannel = supabase
+      .channel('public:todos_realtime')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'todos', filter: `user_id=eq.${userId}` },
+        (payload) => {
+          console.log('⚡ [Realtime] 할 일 변동 감지됨:', payload)
+          fetchBackendData(userId) // 데이터 변경 시 자동으로 전수 리프레시!
+        }
+      )
+      .subscribe()
+
+    // 🔌 컴포넌트가 꺼지거나 로그아웃될 때 실시간 스트림 채널을 안전하게 닫아줍니다 (메모리 누수 방지)
+    return () => {
+      supabase.removeChannel(eventsChannel)
+      supabase.removeChannel(todosChannel)
+    }
+  }, [userId])
+
+  // 📥 데이터베이스 데이터 덤프 로드 엔진
   const fetchBackendData = async (uid) => {
     const { data: eventsData, error: eventsError } = await supabase
       .from('events')
@@ -231,9 +269,8 @@ export default function App() {
           color,
           user_id: userId
         }
-        const { data, error } = await supabase.from('todos').insert([newTodo]).select()
+        const { error } = await supabase.from('todos').insert([newTodo])
         if (error) throw error 
-        if (data && data.length > 0) setTodos((prev) => [...prev, data[0]])
       } else {
         const startIsoString = `${modalStartDate}T${modalTime || '00:00'}:00`
         const startDateObj = new Date(startIsoString)
@@ -264,8 +301,6 @@ export default function App() {
           const { error } = await supabase.from('events').insert([eventDataPayload])
           if (error) throw error 
         }
-        
-        await fetchBackendData(userId)
       }
       
       setIsModalOpen(false)
@@ -281,7 +316,6 @@ export default function App() {
   const handleDeleteEvent = async (id) => {
     const { error } = await supabase.from('events').delete().eq('id', id)
     if (error) alert(`삭제 실패: ${error.message}`)
-    else setEvents(prev => prev.filter(e => e.id !== id))
   }
 
   // 수동 할 일 추가
@@ -298,22 +332,19 @@ export default function App() {
       user_id: userId
     }
 
-    const { data, error } = await supabase.from('todos').insert([newTodo]).select()
+    const { error } = await supabase.from('todos').insert([newTodo])
     if (error) alert(`할 일 추가 실패: ${error.message}`)
-    else if (data) setTodos(prev => [...prev, data[0]])
     e.target.reset()
   }
 
   const handleToggleTodo = async (id, completed) => {
     const { error } = await supabase.from('todos').update({ completed: !completed }).eq('id', id)
     if (error) alert(`상태 변경 실패: ${error.message}`)
-    else setTodos(prev => prev.map(t => t.id === id ? { ...t, completed: !completed } : t))
   }
 
   const handleDeleteTodo = async (id) => {
-    const { error = null } = await supabase.from('todos').delete().eq('id', id)
+    const { error } = await supabase.from('todos').delete().eq('id', id)
     if (error) alert(`할 일 삭제 실패: ${error.message}`)
-    else setTodos(prev => prev.filter(t => t.id !== id))
   }
 
   const handleSignOut = async () => {
@@ -382,7 +413,7 @@ export default function App() {
         category={modalCategory}
         setCategory={setModalCategory}
         onSave={handleSaveEvent}
-        isEditing={isEditing} // 💡 [여기가 핵심] 모달창에 수정 상태를 정밀하게 전달합니다.
+        isEditing={isEditing} 
       />
     </div>
   )
